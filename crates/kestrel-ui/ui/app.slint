@@ -373,7 +373,7 @@ export component AppWindow inherits Window {
                 Rectangle {}
             }
 
-            if page == 5: VerticalLayout {
+            if page == 5: Flickable { VerticalLayout {
                 spacing: 16px;
                 Card { title: "THIS LAPTOP";
                     Text { text: model-name; color: Theme.text; font-size: 16px; font-weight: 600; }
@@ -408,8 +408,7 @@ export component AppWindow inherits Window {
                     HorizontalLayout { alignment: start;
                         Pill { width: 230px; label: "Restore original EC values"; enabled: can-write; clicked => { restore(); } } }
                     Text { text: "Every register Kestrel changes is saved first and can be put back."; color: Theme.muted; font-size: 12px; } }
-                Rectangle {}
-            }
+            } }
         }
     }
 }
