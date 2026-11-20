@@ -14,6 +14,16 @@ pub struct Automation {
     /// Drop the built-in display to 60 Hz on battery and back to its highest rate on AC.
     #[serde(default)]
     pub battery_60hz: bool,
+    /// Auto engine: while one of these programs runs, the first matching rule's scenario is active.
+    #[serde(default)]
+    pub app_rules: Vec<AppRule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppRule {
+    /// Executable file name, e.g. `cyberpunk2077.exe` (case-insensitive).
+    pub exe: String,
+    pub scenario: Scenario,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,6 +64,11 @@ impl Automation {
         std::fs::write(dir.join("automation.json"), json)
     }
 
+    /// The scenario of the first rule whose program is in `running` (lower-case exe names).
+    pub fn app_scenario(&self, running: &[String]) -> Option<Scenario> {
+        self.app_rules.iter().find(|r| running.iter().any(|p| p.eq_ignore_ascii_case(&r.exe))).map(|r| r.scenario)
+    }
+
     pub fn on_power_change(&self, on_ac: bool) -> Actions {
         Actions {
             scenario: if on_ac { self.ac_scenario } else { self.battery_scenario },
@@ -77,10 +92,24 @@ mod tests {
 
     #[test]
     fn actions_follow_power_source() {
-        let a = Automation { battery_scenario: Some(Scenario::SuperBattery), ac_scenario: None, battery_60hz: true };
+        let a = Automation { battery_scenario: Some(Scenario::SuperBattery), battery_60hz: true, ..Default::default() };
         assert_eq!(a.on_power_change(false), Actions { scenario: Some(Scenario::SuperBattery), refresh: Some(Refresh::Hz60) });
         assert_eq!(a.on_power_change(true), Actions { scenario: None, refresh: Some(Refresh::Max) });
         assert_eq!(Automation::default().on_power_change(false), Actions { scenario: None, refresh: None });
+    }
+
+    #[test]
+    fn first_running_rule_wins() {
+        let a = Automation {
+            app_rules: vec![
+                AppRule { exe: "Game.exe".into(), scenario: Scenario::Extreme },
+                AppRule { exe: "obs64.exe".into(), scenario: Scenario::Balanced },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(a.app_scenario(&["obs64.exe".into(), "game.exe".into()]), Some(Scenario::Extreme));
+        assert_eq!(a.app_scenario(&["obs64.exe".into()]), Some(Scenario::Balanced));
+        assert_eq!(a.app_scenario(&["explorer.exe".into()]), None);
     }
 
     #[test]

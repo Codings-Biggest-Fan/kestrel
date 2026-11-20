@@ -102,6 +102,7 @@ mod win {
     /// Applies the user's power automation on every battery/AC transition.
     fn power_watch() {
         let mut last = on_ac();
+        let mut app = AppState::default();
         loop {
             std::thread::sleep(std::time::Duration::from_secs(3));
             let now = on_ac();
@@ -119,7 +120,55 @@ mod win {
             if now.is_some() {
                 last = now;
             }
+            apply_app_rules(&mut app);
         }
+    }
+
+    /// Auto engine state: the rule scenario in force and the scenario to return to afterwards.
+    #[derive(Default)]
+    struct AppState {
+        active: Option<Scenario>,
+        before: Option<Scenario>,
+    }
+
+    fn apply_app_rules(st: &mut AppState) {
+        let auto = Automation::load();
+        if auto.app_rules.is_empty() && st.active.is_none() {
+            return;
+        }
+        let want = auto.app_scenario(&running_exes());
+        if want == st.active {
+            return;
+        }
+        if st.active.is_none() {
+            st.before = current().and_then(|(s, _)| s);
+        }
+        match want.or(st.before) {
+            Some(s) if send(Request::SetScenario(s)).is_ok() => st.active = want,
+            None => st.active = None,
+            _ => {}
+        }
+        if st.active.is_none() {
+            st.before = None;
+        }
+    }
+
+    fn running_exes() -> Vec<String> {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Diagnostics::ToolHelp::*;
+        let mut out = Vec::new();
+        unsafe {
+            let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return out };
+            let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+            let mut ok = Process32FirstW(snap, &mut e).is_ok();
+            while ok {
+                let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+                out.push(String::from_utf16_lossy(&e.szExeFile[..len]).to_ascii_lowercase());
+                ok = Process32NextW(snap, &mut e).is_ok();
+            }
+            let _ = CloseHandle(snap);
+        }
+        out
     }
 
     mod display {
