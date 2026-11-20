@@ -18,6 +18,9 @@ pub enum Request {
     SetCoolerBoost(bool),
     SetChargeLimit(u8),
     SetKbdBacklight(u8),
+    GetFanCurve { gpu: bool },
+    /// Speeds only, one per curve point; also switches the EC to its advanced (curve) fan mode.
+    SetFanCurve { gpu: bool, speeds: Vec<u8> },
     /// Put every register Kestrel changed back to its original value.
     RestoreDefaults,
 }
@@ -26,6 +29,7 @@ pub enum Request {
 pub enum Response {
     Hello { protocol: u32, version: String },
     Status(Box<Status>),
+    FanCurve { temps: Vec<u8>, speeds: Vec<u8> },
     Ok,
     Error(String),
 }
@@ -47,6 +51,8 @@ pub struct Capabilities {
     pub kbd_backlight: bool,
     pub super_battery: bool,
     pub shift_modes: Vec<String>,
+    #[serde(default)]
+    pub fan_curve: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

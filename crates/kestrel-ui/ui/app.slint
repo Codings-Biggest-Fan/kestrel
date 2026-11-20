@@ -173,6 +173,13 @@ export component AppWindow inherits Window {
     callback set-charge(int);
     callback set-kbd(int);
     callback restore();
+    in property <bool> has-curve;
+    in-out property <bool> curve-gpu;
+    in-out property <bool> curve-ready;
+    in property <[int]> curve-temps;
+    in-out property <[int]> curve-speeds;
+    callback load-curve(bool);
+    callback apply-curve(bool, [int]);
 
     property <int> page: 0;
     property <[string]> pages: ["Dashboard", "Scenarios", "Fans", "Battery", "Lighting", "Settings"];
@@ -287,7 +294,27 @@ export component AppWindow inherits Window {
                         Pill { width: 96px; label: "Off"; selected: !cooler-boost; enabled: has-boost && can-write; clicked => { set-boost(false); } }
                         Pill { width: 96px; label: "On"; selected: cooler-boost; enabled: has-boost && can-write; clicked => { set-boost(true); } } }
                     Text { text: "Runs both fans at full speed."; color: Theme.muted; font-size: 12px; } }
-                Card { title: "FAN CURVE"; Text { text: "Curve editor arrives in M2 (verified EC tables only)."; color: Theme.muted; } }
+                if supported: Card { title: "FAN CURVE";
+                    if !has-curve: Text { text: "No verified fan-curve table for this model yet."; color: Theme.muted; }
+                    if has-curve: HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 96px; label: "CPU"; selected: !curve-gpu; clicked => { curve-gpu = false; curve-ready = false; load-curve(false); } }
+                        Pill { width: 96px; label: "GPU"; selected: curve-gpu; clicked => { curve-gpu = true; curve-ready = false; load-curve(true); } } }
+                    if has-curve: HorizontalLayout { spacing: 10px; min-height: 170px; vertical-stretch: 1;
+                        for v[i] in curve-speeds: VerticalLayout { spacing: 6px;
+                            Rectangle { background: #1b1e26; border-radius: 8px; border-width: 1px; border-color: Theme.line;
+                                Rectangle { y: parent.height - self.height; height: parent.height * v / 100; border-radius: 8px;
+                                    background: @linear-gradient(0deg, Theme.accent-fill, Theme.accent);
+                                    animate height { duration: 120ms; easing: ease-out; } }
+                                Text { y: 6px; text: v + "%"; color: Theme.text; font-size: 12px; font-weight: 600; horizontal-alignment: center; }
+                                TouchArea { enabled: can-write && curve-ready; mouse-cursor: can-write && curve-ready ? MouseCursor.ns-resize : MouseCursor.default;
+                                    pointer-event(e) => { if e.kind == PointerEventKind.down { curve-speeds[i] = max(0, min(100, round((1 - self.mouse-y / self.height) * 20) * 5)); } }
+                                    moved => { if self.pressed { curve-speeds[i] = max(0, min(100, round((1 - self.mouse-y / self.height) * 20) * 5)); } } } }
+                            Text { text: i < curve-temps.length ? curve-temps[i] + " °C" : ""; color: Theme.muted; font-size: 11px; horizontal-alignment: center; } } }
+                    if has-curve: HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 128px; label: "Apply curve"; selected: true; enabled: can-write && curve-ready; clicked => { curve-ready = false; apply-curve(curve-gpu, curve-speeds); } }
+                        Pill { width: 96px; label: "Reload"; clicked => { curve-ready = false; load-curve(curve-gpu); } } }
+                    if has-curve: Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "Drag a bar to set fan speed. Speeds are kept rising left to right; temperature points stay as the firmware set them. Choosing a scenario returns fan control to the firmware."; } }
                 Rectangle {}
             }
 
