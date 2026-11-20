@@ -46,9 +46,23 @@ fn handle(mut stream: Stream, state: Shared) {
         _ => return,
     }
     while let Ok(req) = read_frame::<_, Request>(&mut stream) {
-        let resp = {
-            let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-            dispatch(&mut st, req)
+        let resp = match req {
+            Request::GetDriverUpdates => match crate::drivers::list() {
+                Ok(d) => Response::Drivers(d),
+                Err(e) => Response::Error(e),
+            },
+            Request::InstallDriverUpdates(ids) => {
+                let r = crate::drivers::install(&ids);
+                eprintln!("InstallDriverUpdates {ids:?} -> {r:?}");
+                match r {
+                    Ok((reboot, failed)) => Response::Installed { reboot, failed },
+                    Err(e) => Response::Error(e),
+                }
+            }
+            req => {
+                let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+                dispatch(&mut st, req)
+            }
         };
         if write_frame(&mut stream, &resp).is_err() {
             break;
@@ -104,6 +118,7 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
         Request::SetCoolerBoost(on) => result(with_ec(st, |ec| ec.set_cooler_boost(on))),
         Request::SetChargeLimit(p) => result(with_ec(st, |ec| ec.set_charge_limit(p))),
         Request::GetLighting => Response::Lighting(crate::lighting::list()),
+        Request::GetDriverUpdates | Request::InstallDriverUpdates(_) => Response::Error("driver requests are handled per connection".into()),
         Request::SetLighting { device, color, brightness } => match crate::lighting::set(&device, color, brightness) {
             Ok(()) => Response::Ok,
             Err(e) => Response::Error(e),
