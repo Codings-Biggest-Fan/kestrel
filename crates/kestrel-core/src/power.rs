@@ -23,7 +23,9 @@ fn powercfg(args: &[&str]) -> Result<String, String> {
         .output()
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let msg = if err.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { err };
+        return Err(format!("powercfg failed ({}): {msg}", out.status));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
@@ -34,8 +36,9 @@ fn powercfg(_args: &[&str]) -> Result<String, String> {
 }
 
 /// (plugged in, on battery)
-pub fn lid_actions() -> Option<(u8, u8)> {
-    parse_lid(&powercfg(&["/q", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION"]).ok()?)
+pub fn lid_actions() -> Result<(u8, u8), String> {
+    let out = powercfg(&["/q", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION"])?;
+    parse_lid(&out).ok_or_else(|| format!("unexpected powercfg output: {}", out.trim().lines().last().unwrap_or("(empty)")))
 }
 
 pub fn set_lid_action(ac: bool, action: u8) -> Result<(), String> {

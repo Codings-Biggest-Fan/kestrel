@@ -101,26 +101,26 @@ mod win {
 
     /// Applies the user's power automation on every battery/AC transition.
     fn power_watch() {
-        let mut last = on_ac();
+        // `None` first, so the settings for the current power source apply when the tray starts.
+        let mut last: Option<bool> = None;
         let mut app = AppState::default();
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(3));
             let now = on_ac();
-            if let (Some(prev), Some(ac)) = (last, now) {
-                if prev != ac {
+            if let Some(ac) = now {
+                if last != Some(ac) {
                     let a = Automation::load().on_power_change(ac);
-                    if let Some(s) = a.scenario {
-                        let _ = send(Request::SetScenario(s));
-                    }
+                    // Retried next poll if the service is not up yet (it starts alongside the tray).
+                    let sent = a.scenario.is_none_or(|s| send(Request::SetScenario(s)).is_ok());
                     if let Some(r) = a.refresh {
                         let _ = display::set(r);
                     }
+                    if sent {
+                        last = Some(ac);
+                    }
                 }
             }
-            if now.is_some() {
-                last = now;
-            }
             apply_app_rules(&mut app);
+            std::thread::sleep(std::time::Duration::from_secs(3));
         }
     }
 

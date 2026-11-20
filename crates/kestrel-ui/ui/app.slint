@@ -183,6 +183,7 @@ export component AppWindow inherits Window {
     in-out property <int> auto-ac: -1;
     in-out property <bool> auto-60hz;
     in property <int> lid-ac: -1;
+    in property <string> lid-error;
     in property <int> lid-dc: -1;
     callback set-auto(int, int, bool);
     callback set-lid(bool, int);
@@ -195,6 +196,11 @@ export component AppWindow inherits Window {
     in property <string> gpu-stats;
     in property <string> gpu-error;
     callback load-gpu();
+    in property <[string]> drivers;
+    in property <string> driver-status: "Not checked yet.";
+    in property <bool> driver-busy;
+    callback check-drivers();
+    callback install-drivers();
     callback open-driver-page();
     callback set-light(string, int, int);
     callback restore();
@@ -207,8 +213,8 @@ export component AppWindow inherits Window {
     callback apply-curve(bool, [int]);
 
     property <int> page: 0;
-    property <[string]> pages: ["Dashboard", "Scenarios", "Fans", "Battery", "Lighting", "GPU", "Settings"];
-    property <[string]> subtitles: ["Live temperatures, fans and load", "Power and fan profiles", "Cooling and Cooler Boost", "Charging and power source", "Keyboard and RGB devices", "NVIDIA GPU and driver", "Model, firmware and safety"];
+    property <[string]> pages: ["Dashboard", "Scenarios", "Fans", "Battery", "Lighting", "Drivers", "Settings"];
+    property <[string]> subtitles: ["Live temperatures, fans and load", "Power and fan profiles", "Cooling and Cooler Boost", "Charging and power source", "Keyboard and RGB devices", "GPU status and driver updates", "Model, firmware and safety"];
     // Lucide-style 24x24 outline icons.
     property <[string]> icons: [
         "M3 13h8V3H3zM13 21h8V11h-8zM13 3v6h8V3zM3 21h8v-6H3z",
@@ -392,7 +398,15 @@ export component AppWindow inherits Window {
                     if gpu-name != "": VerticalLayout { spacing: 6px;
                         Text { text: gpu-name; color: Theme.text; font-size: 16px; font-weight: 600; }
                         Text { text: gpu-stats; color: Theme.muted; font-size: 13px; } } }
-                Card { title: "DRIVER";
+                Card { title: "DRIVER UPDATES";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "From Windows Update: Wi-Fi, Bluetooth, chipset, audio, graphics and other drivers for this laptop."; }
+                    for d in drivers: Text { text: "• " + d; color: Theme.text; wrap: word-wrap; }
+                    Text { text: driver-status; color: Theme.muted; wrap: word-wrap; }
+                    HorizontalLayout { alignment: start; spacing: 8px;
+                        Pill { width: 160px; label: driver-busy ? "Working…" : "Check for updates"; enabled: connected && !driver-busy; clicked => { check-drivers(); } }
+                        if drivers.length > 0: Pill { width: 160px; label: "Install all"; selected: true; enabled: connected && !driver-busy; clicked => { install-drivers(); } } } }
+                Card { title: "NVIDIA DRIVER";
                     Text { text: gpu-driver == "" ? "Not installed" : "Installed: " + gpu-driver; color: Theme.text; }
                     HorizontalLayout { alignment: start; spacing: 8px;
                         Pill { width: 200px; label: "Get the latest driver"; selected: true; clicked => { open-driver-page(); } } }
@@ -444,7 +458,7 @@ export component AppWindow inherits Window {
                     Text { text: "Plugged in"; color: Theme.muted; font-size: 12px; }
                     HorizontalLayout { spacing: 8px; alignment: start;
                         for a[i] in ["Do nothing", "Sleep", "Hibernate", "Shut down"]: Pill { width: 110px; label: a; selected: lid-ac == i; enabled: lid-ac >= 0; clicked => { set-lid(true, i); } } }
-                    if lid-ac < 0: Text { text: "Could not read the Windows power plan."; color: Theme.muted; font-size: 12px; } }
+                    if lid-ac < 0: Text { text: "Could not read the Windows power plan. " + lid-error; color: Theme.muted; font-size: 12px; wrap: word-wrap; } }
                 if supported: Card { title: "SAFETY";
                     HorizontalLayout { alignment: start;
                         Pill { width: 230px; label: "Restore original EC values"; enabled: can-write; clicked => { restore(); } } }

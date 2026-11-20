@@ -26,6 +26,10 @@ pub enum Request {
     GetLighting,
     /// Static colour on a USB RGB device; `brightness` 0–100, 0 turns it off.
     SetLighting { device: String, color: [u8; 3], brightness: u8 },
+    /// Driver updates Windows Update offers for this PC.
+    GetDriverUpdates,
+    /// Download and install the driver updates with these Windows Update IDs.
+    InstallDriverUpdates(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,8 +38,19 @@ pub enum Response {
     Status(Box<Status>),
     FanCurve { temps: Vec<u8>, speeds: Vec<u8> },
     Lighting(Vec<LightDevice>),
+    Drivers(Vec<DriverUpdate>),
+    Installed { reboot: bool },
     Ok,
     Error(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DriverUpdate {
+    pub id: String,
+    pub title: String,
+    /// Windows driver class, e.g. "Net", "Bluetooth", "Display", "System".
+    pub class: String,
+    pub manufacturer: String,
 }
 
 /// A USB RGB device. `id` is `vid:pid` in hex; unsupported devices are listed so owners can report them.

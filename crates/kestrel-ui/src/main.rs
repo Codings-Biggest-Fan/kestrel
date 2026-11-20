@@ -174,9 +174,42 @@ fn load_lid(weak: Weak<AppWindow>) {
     std::thread::spawn(move || {
         let lid = kestrel_core::power::lid_actions();
         let _ = weak.upgrade_in_event_loop(move |ui| {
-            let (ac, dc) = lid.map_or((-1, -1), |(a, d)| (i32::from(a), i32::from(d)));
+            let (ac, dc) = lid.as_ref().map_or((-1, -1), |&(a, d)| (i32::from(a), i32::from(d)));
             ui.set_lid_ac(ac);
             ui.set_lid_dc(dc);
+            ui.set_lid_error(lid.err().unwrap_or_default().into());
+        });
+    });
+}
+
+static DRIVER_IDS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn driver_call(weak: Weak<AppWindow>, req: Request) {
+    if let Some(ui) = weak.upgrade() {
+        ui.set_driver_busy(true);
+        ui.set_driver_status(if matches!(req, Request::GetDriverUpdates) { "Searching Windows Update…" } else { "Downloading and installing…" }.into());
+    }
+    std::thread::spawn(move || {
+        let r = kestrel_core::transport::client().and_then(|mut c| c.call(&req));
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            ui.set_driver_busy(false);
+            let status = match r {
+                Ok(Response::Drivers(list)) => {
+                    let titles: Vec<SharedString> = list.iter().map(|d| d.title.clone().into()).collect();
+                    *DRIVER_IDS.lock().unwrap_or_else(|p| p.into_inner()) = list.into_iter().map(|d| d.id).collect();
+                    ui.set_drivers(ModelRc::new(VecModel::from(titles.clone())));
+                    if titles.is_empty() { "All drivers are up to date.".to_string() } else { format!("{} update(s) available.", titles.len()) }
+                }
+                Ok(Response::Installed { reboot }) => {
+                    DRIVER_IDS.lock().unwrap_or_else(|p| p.into_inner()).clear();
+                    ui.set_drivers(ModelRc::default());
+                    if reboot { "Installed. Restart Windows to finish.".into() } else { "Installed.".into() }
+                }
+                Ok(Response::Error(e)) => e,
+                Ok(_) => "Unexpected reply from the service.".into(),
+                Err(e) => e.to_string(),
+            };
+            ui.set_driver_status(status.into());
         });
     });
 }
@@ -330,6 +363,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let _ = std::process::Command::new("xdg-open").arg(kestrel_core::gpu::DRIVER_PAGE).spawn();
     });
     load_gpu(ui.as_weak());
+    let w = ui.as_weak();
+    ui.on_check_drivers(move || driver_call(w.clone(), Request::GetDriverUpdates));
+    let w = ui.as_weak();
+    ui.on_install_drivers(move || {
+        let ids = DRIVER_IDS.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        driver_call(w.clone(), Request::InstallDriverUpdates(ids));
+    });
     let w = ui.as_weak();
     ui.on_restore(move || send(w.clone(), Request::RestoreDefaults));
     let w = ui.as_weak();
