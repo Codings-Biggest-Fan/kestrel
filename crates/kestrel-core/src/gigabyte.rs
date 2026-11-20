@@ -63,11 +63,11 @@ impl FanMode {
             FanMode::Custom => (0, 0, 1, 0),
             FanMode::Fixed => (0, 1, 1, 0),
         };
-        // Clear the modes being left before setting the new one, as the firmware expects.
+        // Set in this order (Fixed needs Step first); cleared in reverse (Fixed before Step).
         [
             ("SetAutoFanStatus", auto),
-            ("SetFixedFanStatus", fixed),
             ("SetStepFanStatus", step),
+            ("SetFixedFanStatus", fixed),
             ("SetNvThermalTarget", nv),
         ]
     }
@@ -132,6 +132,7 @@ impl Gigabyte {
         // Clear flags first so the firmware never sees two modes at once.
         for (setter, v) in flags
             .iter()
+            .rev()
             .filter(|(_, v)| *v == 0)
             .chain(flags.iter().filter(|(_, v)| *v != 0))
         {
