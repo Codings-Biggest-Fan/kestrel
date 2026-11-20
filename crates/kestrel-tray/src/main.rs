@@ -77,7 +77,7 @@ mod win {
             nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
             nid.uCallbackMessage = WM_TRAY;
             nid.hIcon = LoadIconW(Some(hinst.into()), PCWSTR(1 as _)).or_else(|_| LoadIconW(None, IDI_APPLICATION)).unwrap_or_default();
-            let tip: Vec<u16> = "Kestrel - Ctrl+Alt+S next scenario".encode_utf16().collect();
+            let tip: Vec<u16> = "Kestrel - Ctrl+Alt+F9 next scenario".encode_utf16().collect();
             nid.szTip[..tip.len()].copy_from_slice(&tip);
             let _ = Shell_NotifyIconW(NIM_ADD, &nid);
             register_hotkeys(hwnd);
@@ -218,14 +218,15 @@ mod win {
         NOTIFYICONDATAW { cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32, hWnd: hwnd, uID: 1, ..Default::default() }
     }
 
-    /// Ctrl+Alt+S cycles scenarios, Ctrl+Alt+B toggles Cooler Boost. A combination another
-    /// program already owns is skipped.
+    /// Ctrl+Alt+F9 cycles scenarios, Ctrl+Alt+F10 toggles Cooler Boost. Function keys, because
+    /// AltGr is Ctrl+Alt and Ctrl+Alt+letter would swallow characters on many layouts. A
+    /// combination another program already owns is skipped.
     unsafe fn register_hotkeys(hwnd: HWND) {
-        use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT};
+        use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, VK_F10, VK_F9};
         let mods = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT;
-        for (id, key) in [(HK_SCENARIO, 'S'), (HK_BOOST, 'B')] {
-            if RegisterHotKey(Some(hwnd), id, mods, key as u32).is_err() {
-                eprintln!("hotkey Ctrl+Alt+{key} is taken by another program");
+        for (id, key, name) in [(HK_SCENARIO, VK_F9, "F9"), (HK_BOOST, VK_F10, "F10")] {
+            if RegisterHotKey(Some(hwnd), id, mods, key.0 as u32).is_err() {
+                eprintln!("hotkey Ctrl+Alt+{name} is taken by another program");
             }
         }
     }
@@ -269,7 +270,7 @@ mod win {
         }
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
         let boost_flags = if boost == Some(true) { MF_STRING | MF_CHECKED } else if connected { MF_STRING } else { MF_STRING | MF_GRAYED };
-        let _ = AppendMenuW(menu, boost_flags, ID_BOOST, w!("Cooler Boost\tCtrl+Alt+B"));
+        let _ = AppendMenuW(menu, boost_flags, ID_BOOST, w!("Cooler Boost\tCtrl+Alt+F10"));
         let _ = AppendMenuW(menu, MF_STRING, ID_OPEN, w!("Open Kestrel"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
         let _ = AppendMenuW(menu, MF_STRING, ID_QUIT, w!("Quit tray"));
