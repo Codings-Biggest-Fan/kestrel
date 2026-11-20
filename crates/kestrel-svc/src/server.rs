@@ -74,7 +74,17 @@ pub fn dispatch(st: &mut State, req: Request) -> Response {
     let regs = st.ec.as_mut().map(|ec| {
         let c = ec.conf().clone();
         let addrs = [c.cooler_boost.and_then(|f| f.address), c.shift_mode.and_then(|m| m.address), c.fan_mode.and_then(|m| m.address)];
-        addrs.into_iter().flatten().map(|a| format!("0x{a:02x}={}", ec.peek(a).map_or("??".into(), |v| format!("0x{v:02x}")))).collect::<Vec<_>>().join(" ")
+        let mut line = addrs.into_iter().flatten().map(|a| format!("0x{a:02x}={}", ec.peek(a).map_or("??".into(), |v| format!("0x{v:02x}")))).collect::<Vec<_>>().join(" ");
+        // Bytes just before each speed table hold the duty the EC is currently applying.
+        if let Some(fc) = c.fan_curve {
+            let mut duty = |a: u8| ec.peek(a).map_or("??".into(), |v| v.to_string());
+            let (cd, gd) = (duty(fc.cpu_speed_base - 1), duty(fc.gpu_speed_base - 1));
+            line += &format!(" duty cpu={cd}% gpu={gd}%");
+        }
+        if let Ok([cpu, gpu]) = ec.fan_rpm() {
+            line += &format!(" rpm cpu={} gpu={}", cpu.unwrap_or(0), gpu.unwrap_or(0));
+        }
+        line
     });
     eprintln!("{desc} -> {resp:?} | {}", regs.unwrap_or_default());
     resp
@@ -99,13 +109,23 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
             Some(Err(e)) => Response::Error(e.to_string()),
             None => Response::Error("no supported EC on this laptop".into()),
         },
-        Request::SetFanCurve { gpu, speeds } => result(with_ec(st, |ec| {
-            ec.set_fan_curve_speeds(gpu, &speeds)?;
-            if ec.conf().fan_mode.as_ref().is_some_and(|m| m.modes.contains_key("advanced")) {
-                ec.set_fan_mode("advanced")?;
+        Request::SetFanCurve { gpu, speeds } => {
+            let extreme = st.ec.as_ref().and_then(|ec| ec.conf().fan_curve).is_some_and(|f| f.requires_extreme);
+            let r = with_ec(st, |ec| {
+                ec.set_fan_curve_speeds(gpu, &speeds)?;
+                if extreme {
+                    ec.set_shift_mode("turbo")?;
+                }
+                if ec.conf().fan_mode.as_ref().is_some_and(|m| m.modes.contains_key("advanced")) {
+                    ec.set_fan_mode("advanced")?;
+                }
+                Ok(())
+            });
+            if r.is_ok() && extreme {
+                st.scenario = Some(Scenario::Extreme);
             }
-            Ok(())
-        })),
+            result(r)
+        }
         Request::RestoreDefaults => {
             st.scenario = None;
             result(with_ec(st, |ec| ec.restore().map(|_| ())))

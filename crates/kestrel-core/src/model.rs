@@ -106,6 +106,9 @@ pub struct FanCurveMap {
     pub gpu_temp_base: u8,
     pub gpu_speed_base: u8,
     pub points: u8,
+    /// The EC only follows the curve while the shift mode is turbo (Extreme).
+    #[serde(default)]
+    pub requires_extreme: bool,
 }
 
 /// One EC register map, shared by every firmware listed in `firmware`.
@@ -207,6 +210,7 @@ mod tests {
         assert_eq!(m.conf.tier, Tier::Tested);
         assert!(m.conf.super_battery.is_none());
         assert_eq!(m.conf.fan_curve.unwrap().cpu_speed_base, 0x72);
+        assert!(m.conf.fan_curve.unwrap().requires_extreme);
         assert_eq!(m.conf.fan_rpm.unwrap().cpu_address, Some(0xc8));
     }
 

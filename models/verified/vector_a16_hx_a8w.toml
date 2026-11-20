@@ -52,3 +52,5 @@ cpu_speed_base = 0x72
 gpu_temp_base = 0x81
 gpu_speed_base = 0x8a
 points = 6
+# Owner-confirmed on 15MMIMS1.103: the curve is only followed in Extreme (shift 0xC4).
+requires_extreme = true
