@@ -51,7 +51,7 @@ mod win {
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::Shell::{
-        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+        Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
     };
     use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -75,9 +75,9 @@ mod win {
             nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
             nid.uCallbackMessage = WM_TRAY;
             nid.hIcon = LoadIconW(Some(hinst.into()), PCWSTR(1 as _)).or_else(|_| LoadIconW(None, IDI_APPLICATION)).unwrap_or_default();
-            let tip: Vec<u16> = "Kestrel".encode_utf16().collect();
-            nid.szTip[..tip.len()].copy_from_slice(&tip);
+            set_tip(&mut nid, "Kestrel");
             let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+            TRAY_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::Relaxed);
             std::thread::Builder::new().name("power".into()).stack_size(128 * 1024).spawn(power_watch).ok();
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -104,6 +104,7 @@ mod win {
         // `None` first, so the settings for the current power source apply when the tray starts.
         let mut last: Option<bool> = None;
         let mut app = AppState::default();
+        let mut tip = String::new();
         loop {
             let now = on_ac();
             if let Some(ac) = now {
@@ -120,6 +121,11 @@ mod win {
                 }
             }
             apply_app_rules(&mut app);
+            let t = tip_text();
+            if t != tip {
+                update_tip(&t);
+                tip = t;
+            }
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
     }
@@ -209,6 +215,46 @@ mod win {
                 Ok(hz)
             }
         }
+    }
+
+    static TRAY_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+    /// Hover text: temperatures and the active scenario, refreshed by the power thread.
+    fn tip_text() -> String {
+        let Ok(s) = kestrel_core::transport::client().and_then(|mut c| c.status()) else {
+            return "Kestrel: service not running".into();
+        };
+        let mut t = String::from("Kestrel");
+        let temps: Vec<String> = [("CPU", s.cpu_temp), ("GPU", s.gpu_temp)]
+            .into_iter()
+            .filter_map(|(n, v)| v.map(|v| format!("{n} {v}°C")))
+            .collect();
+        if !temps.is_empty() {
+            t.push('\n');
+            t.push_str(&temps.join(" · "));
+        }
+        if let Some(sc) = s.scenario {
+            t.push('\n');
+            t.push_str(sc.label());
+        }
+        t
+    }
+
+    fn set_tip(nid: &mut NOTIFYICONDATAW, text: &str) {
+        let tip: Vec<u16> = text.encode_utf16().take(nid.szTip.len() - 1).collect();
+        nid.szTip = [0; 128];
+        nid.szTip[..tip.len()].copy_from_slice(&tip);
+    }
+
+    fn update_tip(text: &str) {
+        let h = TRAY_HWND.load(std::sync::atomic::Ordering::Relaxed);
+        if h == 0 {
+            return;
+        }
+        let mut nid = icon_data(HWND(h as *mut _));
+        nid.uFlags = NIF_TIP;
+        set_tip(&mut nid, text);
+        let _ = unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid) };
     }
 
     fn icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
