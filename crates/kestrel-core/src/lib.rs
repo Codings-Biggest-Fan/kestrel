@@ -1,10 +1,12 @@
 //! Shared code for the Kestrel service, tray and UI.
 
+pub mod automation;
 pub mod ec;
 pub mod fan;
 pub mod ipc;
 pub mod journal;
 pub mod model;
+pub mod power;
 pub mod scenario;
 pub mod transport;
 
