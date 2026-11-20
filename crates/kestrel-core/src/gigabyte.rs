@@ -128,6 +128,11 @@ impl Gigabyte {
         if self.read_only {
             return Err(EcError::ReadOnly);
         }
+        if mode == FanMode::Quiet && !self.has_nv_target {
+            return Err(EcError::Unsupported(
+                "Quiet fan mode (no GetNvThermalTarget)",
+            ));
+        }
         let flags = mode.flags();
         // Clear flags first so the firmware never sees two modes at once.
         for (setter, v) in flags
