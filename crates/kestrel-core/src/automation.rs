@@ -17,6 +17,15 @@ pub struct Automation {
     /// Auto engine: while one of these programs runs, the first matching rule's scenario is active.
     #[serde(default)]
     pub app_rules: Vec<AppRule>,
+    /// On battery, switch to this scenario once the charge drops to `below_pct` or lower.
+    #[serde(default)]
+    pub low_battery: Option<BatteryRule>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BatteryRule {
+    pub below_pct: u8,
+    pub scenario: Scenario,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -69,6 +78,12 @@ impl Automation {
         self.app_rules.iter().find(|r| running.iter().any(|p| p.eq_ignore_ascii_case(&r.exe))).map(|r| r.scenario)
     }
 
+    /// The low-battery scenario if it applies right now.
+    pub fn low_battery_scenario(&self, on_ac: bool, pct: Option<u8>) -> Option<Scenario> {
+        let r = self.low_battery?;
+        (!on_ac && pct? <= r.below_pct).then_some(r.scenario)
+    }
+
     pub fn on_power_change(&self, on_ac: bool) -> Actions {
         Actions {
             scenario: if on_ac { self.ac_scenario } else { self.battery_scenario },
@@ -110,6 +125,16 @@ mod tests {
         assert_eq!(a.app_scenario(&["obs64.exe".into(), "game.exe".into()]), Some(Scenario::Extreme));
         assert_eq!(a.app_scenario(&["obs64.exe".into()]), Some(Scenario::Balanced));
         assert_eq!(a.app_scenario(&["explorer.exe".into()]), None);
+    }
+
+    #[test]
+    fn low_battery_rule() {
+        let a = Automation { low_battery: Some(BatteryRule { below_pct: 30, scenario: Scenario::Silent }), ..Default::default() };
+        assert_eq!(a.low_battery_scenario(false, Some(30)), Some(Scenario::Silent));
+        assert_eq!(a.low_battery_scenario(false, Some(31)), None);
+        assert_eq!(a.low_battery_scenario(true, Some(10)), None);
+        assert_eq!(a.low_battery_scenario(false, None), None);
+        assert_eq!(Automation::default().low_battery_scenario(false, Some(5)), None);
     }
 
     #[test]
