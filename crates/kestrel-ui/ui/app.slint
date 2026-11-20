@@ -122,6 +122,7 @@ component Unsupported inherits Card {
 }
 
 export struct ScenarioItem { label: string, hint: string }
+export struct ProfileItem { name: string, desc: string, preset: bool }
 export struct LightItem { id: string, name: string, kind: string, supported: bool }
 
 export component AppWindow inherits Window {
@@ -142,6 +143,11 @@ export component AppWindow inherits Window {
     property <bool> can-write: connected && supported && !read-only;
     in property <string> message;
     in property <[ScenarioItem]> scenarios;
+    in property <[ProfileItem]> profiles;
+    in-out property <bool> save-curves;
+    callback apply-profile(int);
+    callback delete-profile(int);
+    callback save-profile(string, bool);
     in property <int> scenario: -1;
     in property <string> cpu-temp: "–";
     in property <string> gpu-temp: "–";
@@ -300,7 +306,7 @@ export component AppWindow inherits Window {
                 Rectangle {}
             }
 
-            if page == 1: VerticalLayout {
+            if page == 1: Flickable { interactive: false; VerticalLayout {
                 spacing: 12px;
                 if connected && !supported: Unsupported {}
                 for s[i] in supported ? scenarios : []: Rectangle {
@@ -317,8 +323,24 @@ export component AppWindow inherits Window {
                             Text { text: s.label; color: Theme.text; font-size: 15px; font-weight: 600; }
                             Text { text: s.hint; color: Theme.muted; font-size: 12px; } } }
                 }
-                Rectangle {}
-            }
+                if supported: Card { title: "PROFILES";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "A scenario with optional fan curves and Cooler Boost, applied in one click. Fan curves switch laptops like the Vector A16 HX to Extreme."; }
+                    for p[i] in profiles: HorizontalLayout { spacing: 10px;
+                        VerticalLayout { alignment: center; spacing: 2px;
+                            Text { text: p.name; color: Theme.text; font-size: 14px; font-weight: 600; }
+                            Text { text: p.preset ? p.desc : p.desc + " · yours"; color: Theme.muted; font-size: 12px; } }
+                        Pill { width: 90px; label: "Apply"; enabled: can-write; clicked => { apply-profile(i); } }
+                        Rectangle { width: 90px;
+                            if !p.preset: Pill { width: 90px; label: "Delete"; clicked => { delete-profile(i); } } } }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Rectangle { width: 200px; height: 34px; border-radius: 8px; background: #0f1115; border-width: 1px; border-color: #2a2f3a;
+                            name-input := TextInput { x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
+                            if name-input.text == "": Text { x: 10px; text: "Profile name"; color: Theme.muted; vertical-alignment: center; font-size: 13px; } }
+                        if has-curve: Pill { width: 190px; label: save-curves ? "With current fan curves" : "Without fan curves"; selected: save-curves; clicked => { save-curves = !save-curves; } }
+                        Pill { width: 130px; label: "Save current"; selected: true; enabled: can-write && name-input.text != "";
+                            clicked => { save-profile(name-input.text, save-curves); name-input.text = ""; } } } }
+            } }
 
             if page == 2: Flickable { interactive: false; VerticalLayout {
                 spacing: 16px;

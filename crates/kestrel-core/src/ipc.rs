@@ -86,6 +86,9 @@ pub struct Capabilities {
     /// Scenarios to offer, in `Scenario::ALL` order.
     #[serde(default)]
     pub scenarios: Vec<Scenario>,
+    /// Points per fan curve (0 = no editable curve).
+    #[serde(default)]
+    pub curve_points: u8,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
