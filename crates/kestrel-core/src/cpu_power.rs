@@ -145,6 +145,13 @@ pub fn intel_encode(units: u64, old: u64, pl1_w: u32, pl2_w: u32) -> u64 {
     keep | raw(pl1_w) | (1 << 15) | (raw(pl2_w) << 32) | (1 << 47)
 }
 
+/// MSR value that puts back only the PL1/PL2 fields and enable bits of a journaled `orig`
+/// onto `current`; everything else, including the lock bit, comes from `current`.
+pub fn intel_restore_value(current: u64, orig: u64) -> u64 {
+    const PL: u64 = 0xffff | (0xffff << 32);
+    (current & !PL & !(1 << 63)) | (orig & PL)
+}
+
 /// Clamp a request: both in bounds and boost never below sustained.
 pub fn clamp(sustained_w: u32, boost_w: u32) -> (u32, u32) {
     let s = sustained_w.clamp(MIN_W, MAX_W);
@@ -190,6 +197,17 @@ mod tests {
         assert_eq!((l.pl1_w, l.pl2_w), (55, 90));
         assert_eq!(new & ((1 << 16) | (0x6e << 17) | (1 << 48) | (0x21 << 49)), old & ((1 << 16) | (0x6e << 17) | (1 << 48) | (0x21 << 49)));
         assert!(new & (1 << 15) != 0 && new & (1 << 47) != 0);
+    }
+
+    #[test]
+    fn restore_only_touches_limits() {
+        let cur: u64 = (0x6e << 17) | 400 | (1 << 15) | (600 << 32);
+        let orig: u64 = (1 << 63) | (0x7f << 17) | 360 | (1 << 15) | (480 << 32) | (1 << 47);
+        let v = intel_restore_value(cur, orig);
+        assert_eq!(v >> 63, 0);
+        assert_eq!(v & (0x7f << 17), 0x6e << 17);
+        assert_eq!(v & 0xffff, 360 | (1 << 15));
+        assert_eq!((v >> 32) & 0xffff, 480 | (1 << 15));
     }
 
     #[test]

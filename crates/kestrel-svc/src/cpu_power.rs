@@ -170,6 +170,24 @@ mod imp {
         crate::settings::data_dir().join("intel_power_limit.orig")
     }
 
+    /// `Ok(None)` when there is no usable journal; a damaged file counts as none.
+    fn read_original() -> Result<Option<u64>, String> {
+        match std::fs::read_to_string(original_path()) {
+            Ok(t) => Ok(u64::from_str_radix(t.trim().trim_start_matches("0x"), 16).ok()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("Couldn't read the saved original limits: {e}")),
+        }
+    }
+
+    fn save_original(v: u64) -> Result<(), String> {
+        let dir = crate::settings::data_dir();
+        let tmp = dir.join("intel_power_limit.orig.tmp");
+        std::fs::create_dir_all(&dir)
+            .and_then(|()| std::fs::write(&tmp, format!("{v:#x}")))
+            .and_then(|()| std::fs::rename(&tmp, original_path()))
+            .map_err(|e| format!("Couldn't save the original limits: {e}"))
+    }
+
     fn with<T>(m: &Mutex<Option<Module>>, blob: &[u8], f: impl FnOnce(&Module) -> Result<T, String>) -> Result<T, String> {
         let mut g = m.lock().unwrap_or_else(|p| p.into_inner());
         if g.is_none() {
@@ -256,10 +274,8 @@ mod imp {
             if old >> 63 == 1 {
                 return Err("The BIOS has locked the power limits on this laptop.".into());
             }
-            let orig = original_path();
-            if !orig.exists() {
-                std::fs::create_dir_all(crate::settings::data_dir()).map_err(|e| e.to_string())?;
-                std::fs::write(&orig, format!("{old:#x}")).map_err(|e| format!("Couldn't save the original limits: {e}"))?;
+            if read_original()?.is_none() {
+                save_original(old)?;
             }
             let new = cp::intel_encode(units, old, pl1, pl2);
             m.call(s!("ioctl_write_msr"), &[cp::MSR_PKG_POWER_LIMIT.into(), new], &mut [])?;
@@ -273,12 +289,17 @@ mod imp {
     }
 
     pub fn intel_restore() -> Result<(), String> {
-        let path = original_path();
-        let Ok(text) = std::fs::read_to_string(&path) else { return Ok(()) };
-        let orig = u64::from_str_radix(text.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
-        with(&MSR, INTEL_MSR, |m| m.call(s!("ioctl_write_msr"), &[cp::MSR_PKG_POWER_LIMIT.into(), orig], &mut []))?;
-        let _ = std::fs::remove_file(path);
-        Ok(())
+        // Journal read, MSR write and journal removal all happen under the MSR module lock,
+        // so they can't interleave with `intel_write`.
+        with(&MSR, INTEL_MSR, |m| {
+            let Some(orig) = read_original()? else { return Ok(()) };
+            let cur = msr(m, cp::MSR_PKG_POWER_LIMIT)?;
+            if cur >> 63 == 1 {
+                return Err("The BIOS has locked the power limits on this laptop.".into());
+            }
+            m.call(s!("ioctl_write_msr"), &[cp::MSR_PKG_POWER_LIMIT.into(), cp::intel_restore_value(cur, orig)], &mut [])?;
+            std::fs::remove_file(original_path()).map_err(|e| format!("Restored, but couldn't clear the saved limits: {e}"))
+        })
     }
 }
 
