@@ -20,6 +20,15 @@ pub struct Automation {
     /// Time windows (local time) with their scenario; the first matching window wins.
     #[serde(default)]
     pub schedule: Vec<TimeRule>,
+    /// On battery, switch to this scenario once the charge drops to `below_pct` or lower.
+    #[serde(default)]
+    pub low_battery: Option<BatteryRule>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BatteryRule {
+    pub below_pct: u8,
+    pub scenario: Scenario,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -105,6 +114,12 @@ impl Automation {
         self.schedule.iter().find(|r| r.contains(minute)).map(|r| r.scenario)
     }
 
+    /// The low-battery scenario if it applies right now.
+    pub fn low_battery_scenario(&self, on_ac: bool, pct: Option<u8>) -> Option<Scenario> {
+        let r = self.low_battery?;
+        (!on_ac && pct? <= r.below_pct).then_some(r.scenario)
+    }
+
     pub fn on_power_change(&self, on_ac: bool) -> Actions {
         Actions {
             scenario: if on_ac { self.ac_scenario } else { self.battery_scenario },
@@ -168,6 +183,16 @@ mod tests {
         assert_eq!(parse_hhmm("24:00"), None);
         assert_eq!(parse_hhmm("12:5x"), None);
         assert_eq!(fmt_hhmm(425), "07:05");
+    }
+
+    #[test]
+    fn low_battery_rule() {
+        let a = Automation { low_battery: Some(BatteryRule { below_pct: 30, scenario: Scenario::Silent }), ..Default::default() };
+        assert_eq!(a.low_battery_scenario(false, Some(30)), Some(Scenario::Silent));
+        assert_eq!(a.low_battery_scenario(false, Some(31)), None);
+        assert_eq!(a.low_battery_scenario(true, Some(10)), None);
+        assert_eq!(a.low_battery_scenario(false, None), None);
+        assert_eq!(Automation::default().low_battery_scenario(false, Some(5)), None);
     }
 
     #[test]

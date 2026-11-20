@@ -142,6 +142,8 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
             result(r)
         }
         Request::SetCoolerBoost(on) => result(with_ec(st, |ec| ec.set_cooler_boost(on))),
+        Request::SetWebcam(on) => result(with_ec(st, |ec| ec.set_webcam(on))),
+        Request::SetFnWinSwap(on) => result(with_ec(st, |ec| ec.set_fn_win_swap(on))),
         Request::SetChargeLimit(p) => result(with_ec(st, |ec| ec.set_charge_limit(p))),
         Request::GetLighting => Response::Lighting(crate::lighting::list()),
         Request::GetDriverUpdates | Request::InstallDriverUpdates(_) | Request::GetCpuPower | Request::SetCpuPower { .. } | Request::ResetCpuPower => {
@@ -229,7 +231,15 @@ fn status(st: &mut State) -> Status {
             fan_curve: c.fan_curve.is_some(),
             scenarios: Scenario::available(c),
             curve_points: c.fan_curve.map_or(0, |f| f.points),
+            webcam: c.webcam.and_then(|w| w.address).is_some(),
+            fn_win_swap: c.fn_win_swap.and_then(|f| f.address).is_some(),
         };
+        if s.caps.webcam {
+            s.webcam = ec.webcam().ok();
+        }
+        if s.caps.fn_win_swap {
+            s.fn_win_swap = ec.fn_win_swap().ok();
+        }
         s.cooler_boost = ec.cooler_boost().ok();
         s.charge_limit = ec.charge_limit().ok().flatten();
         s.kbd_backlight = ec.kbd_backlight().ok();

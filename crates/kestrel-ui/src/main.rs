@@ -1,7 +1,7 @@
 //! kestrel-ui: main window. Talks to kestrel-svc over IPC and exits when closed.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use kestrel_core::automation::{fmt_hhmm, parse_hhmm, AppRule, Automation, TimeRule};
+use kestrel_core::automation::{fmt_hhmm, parse_hhmm, AppRule, Automation, BatteryRule, TimeRule};
 use kestrel_core::profiles::{self, Profile};
 use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
@@ -87,6 +87,10 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_battery(opt(s.battery_pct, "%"));
     ui.set_power_source(match s.on_ac { Some(true) => "Plugged in", Some(false) => "On battery", None => "Unknown" }.into());
     ui.set_has_boost(s.caps.cooler_boost);
+    ui.set_has_webcam(s.caps.webcam);
+    ui.set_webcam(s.webcam.unwrap_or(false));
+    ui.set_has_fn_swap(s.caps.fn_win_swap);
+    ui.set_fn_swap(s.fn_win_swap.unwrap_or(false));
     if s.caps.fan_curve && !ui.get_has_curve() {
         ui.invoke_load_curve(ui.get_curve_gpu());
     }
@@ -363,6 +367,7 @@ fn show_scenarios(ui: &AppWindow, list: Vec<Scenario>) {
     let auto = Automation::load();
     ui.set_auto_bat(shown_index(auto.battery_scenario));
     ui.set_auto_ac(shown_index(auto.ac_scenario));
+    ui.set_auto_low_scn(shown_index(auto.low_battery.map(|r| r.scenario)));
 }
 
 static CURVE_POINTS: AtomicU64 = AtomicU64::new(0);
@@ -472,6 +477,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let w = ui.as_weak();
     ui.on_set_boost(move |on| send(w.clone(), Request::SetCoolerBoost(on)));
     let w = ui.as_weak();
+    ui.on_set_webcam(move |on| send(w.clone(), Request::SetWebcam(on)));
+    let w = ui.as_weak();
+    ui.on_set_fn_swap(move |on| send(w.clone(), Request::SetFnWinSwap(on)));
+    let w = ui.as_weak();
     ui.on_set_charge(move |p| send(w.clone(), Request::SetChargeLimit(p.clamp(10, 100) as u8)));
     let w = ui.as_weak();
     ui.on_set_kbd(move |l| send(w.clone(), Request::SetKbdBacklight(l.clamp(0, 3) as u8)));
@@ -488,6 +497,16 @@ fn main() -> Result<(), slint::PlatformError> {
     load_lights(ui.as_weak());
     let auto = Automation::load();
     ui.set_auto_60hz(auto.battery_60hz);
+    ui.set_auto_low_pct(auto.low_battery.map_or(0, |r| r.below_pct as i32));
+    let w = ui.as_weak();
+    ui.on_set_low_battery(move |pct, scn| {
+        let rule = shown_at(scn).filter(|_| pct > 0).map(|scenario| BatteryRule { below_pct: pct.clamp(1, 100) as u8, scenario });
+        let a = Automation { low_battery: rule, ..Automation::load() };
+        let msg: SharedString = a.save().err().map(|e| format!("Could not save automation: {e}")).unwrap_or_default().into();
+        if let Some(ui) = w.upgrade() {
+            ui.set_message(msg);
+        }
+    });
     let w = ui.as_weak();
     ui.on_set_auto(move |bat, ac, hz60| {
         let a = Automation { battery_scenario: shown_at(bat), ac_scenario: shown_at(ac), battery_60hz: hz60, ..Automation::load() };
