@@ -1,7 +1,7 @@
 //! kestrel-ui: main window. Talks to kestrel-svc over IPC and exits when closed.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use kestrel_core::automation::{AppRule, Automation, BatteryRule};
+use kestrel_core::automation::{fmt_hhmm, parse_hhmm, AppRule, Automation, BatteryRule, TimeRule};
 use kestrel_core::profiles::{self, Profile};
 use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
@@ -179,6 +179,14 @@ fn load_lights(weak: Weak<AppWindow>) {
 fn show_rules(ui: &AppWindow, rules: &[AppRule]) {
     let items: Vec<SharedString> = rules.iter().map(|r| format!("{}  →  {}", r.exe, r.scenario.label()).into()).collect();
     ui.set_rules(ModelRc::new(VecModel::from(items)));
+}
+
+fn show_sched(ui: &AppWindow, rules: &[TimeRule]) {
+    let items: Vec<SharedString> = rules
+        .iter()
+        .map(|r| format!("{} – {}  →  {}", fmt_hhmm(r.start), fmt_hhmm(r.end), r.scenario.label()).into())
+        .collect();
+    ui.set_sched(ModelRc::new(VecModel::from(items)));
 }
 
 fn load_lid(weak: Weak<AppWindow>) {
@@ -520,6 +528,36 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     load_lid(ui.as_weak());
     show_rules(&ui, &auto.app_rules);
+    show_sched(&ui, &auto.schedule);
+    let w = ui.as_weak();
+    ui.on_add_sched(move |from, to, scenario| {
+        let Some(ui) = w.upgrade() else { return };
+        let (Some(start), Some(end)) = (parse_hhmm(&from), parse_hhmm(&to)) else {
+            ui.set_message("Enter times as HH:MM, for example 22:00.".into());
+            return;
+        };
+        if start == end {
+            ui.set_message("The start and end times must differ.".into());
+            return;
+        }
+        let Some(scenario) = shown_at(scenario) else { return };
+        let mut a = Automation::load();
+        a.schedule.push(TimeRule { start, end, scenario });
+        ui.set_message(a.save().err().map(|e| e.to_string()).unwrap_or_default().into());
+        show_sched(&ui, &a.schedule);
+    });
+    let w = ui.as_weak();
+    ui.on_remove_sched(move |i| {
+        let Some(ui) = w.upgrade() else { return };
+        let mut a = Automation::load();
+        if let Ok(i) = usize::try_from(i) {
+            if i < a.schedule.len() {
+                a.schedule.remove(i);
+            }
+        }
+        ui.set_message(a.save().err().map(|e| e.to_string()).unwrap_or_default().into());
+        show_sched(&ui, &a.schedule);
+    });
     let w = ui.as_weak();
     ui.on_add_rule(move |exe, scenario| {
         let Some(ui) = w.upgrade() else { return };

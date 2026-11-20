@@ -216,6 +216,10 @@ export component AppWindow inherits Window {
     in-out property <int> rule-scn: 0;
     callback add-rule(string, int);
     callback remove-rule(int);
+    in property <[string]> sched;
+    in-out property <int> sched-scn: 0;
+    callback add-sched(string, string, int);
+    callback remove-sched(int);
     in property <string> gpu-name;
     in property <string> gpu-driver;
     in property <string> gpu-stats;
@@ -553,6 +557,23 @@ export component AppWindow inherits Window {
                         for s[i] in scenarios: Pill { width: 100px; label: s.label; selected: rule-scn == i; clicked => { rule-scn = i; } }
                         Pill { width: 80px; label: "Add"; selected: true; enabled: exe-input.text != "";
                             clicked => { add-rule(exe-input.text, rule-scn); exe-input.text = ""; } } } }
+                Card { title: "SCHEDULE";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "Switches scenario when a time window starts (24-hour local time) and switches back when it ends. Program rules above take priority while they run."; }
+                    for r[i] in sched: HorizontalLayout { spacing: 10px; alignment: start;
+                        Text { text: r; color: Theme.text; vertical-alignment: center; min-width: 300px; }
+                        Pill { width: 90px; label: "Remove"; clicked => { remove-sched(i); } } }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Rectangle { width: 80px; height: 34px; border-radius: 8px; background: #0f1115; border-width: 1px; border-color: #2a2f3a;
+                            from-input := TextInput { x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
+                            if from-input.text == "": Text { x: 10px; text: "22:00"; color: Theme.muted; vertical-alignment: center; font-size: 13px; } }
+                        Text { text: "to"; color: Theme.muted; vertical-alignment: center; }
+                        Rectangle { width: 80px; height: 34px; border-radius: 8px; background: #0f1115; border-width: 1px; border-color: #2a2f3a;
+                            to-input := TextInput { x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
+                            if to-input.text == "": Text { x: 10px; text: "07:00"; color: Theme.muted; vertical-alignment: center; font-size: 13px; } }
+                        for s[i] in scenarios: Pill { width: 100px; label: s.label; selected: sched-scn == i; clicked => { sched-scn = i; } }
+                        Pill { width: 80px; label: "Add"; selected: true; enabled: from-input.text != "" && to-input.text != "";
+                            clicked => { add-sched(from-input.text, to-input.text, sched-scn); } } } }
                 Card { title: "WHEN I CLOSE THE LID";
                     Text { text: "On battery"; color: Theme.muted; font-size: 12px; }
                     HorizontalLayout { spacing: 8px; alignment: start;

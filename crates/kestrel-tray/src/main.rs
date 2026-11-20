@@ -115,6 +115,7 @@ mod win {
         // `None` first, so the settings for the current power source apply when the tray starts.
         let mut last: Option<bool> = None;
         let mut app = AppState::default();
+        let mut sched = AppState::default();
         let mut tip = String::new();
         let mut low: Option<Scenario> = None;
         loop {
@@ -131,6 +132,10 @@ mod win {
                         last = Some(ac);
                     }
                 }
+            }
+            // Low battery outranks the schedule: re-apply it after any schedule switch.
+            if apply_schedule(&mut sched, &mut app) {
+                low = None;
             }
             if let Some(ac) = now {
                 let auto = Automation::load();
@@ -197,6 +202,49 @@ mod win {
         if st.active.is_none() {
             st.before = None;
         }
+    }
+
+    fn local_minute() -> u16 {
+        let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+        t.wHour * 60 + t.wMinute
+    }
+
+    /// Switches when a schedule window starts. When it ends, the earlier scenario comes back,
+    /// unless something else changed the scenario in the meantime.
+    fn apply_schedule(st: &mut AppState, app: &mut AppState) -> bool {
+        let auto = Automation::load();
+        if auto.schedule.is_empty() && st.active.is_none() {
+            return false;
+        }
+        let want = auto.scheduled(local_minute());
+        if want == st.active {
+            return false;
+        }
+        let current = current().and_then(|(s, _)| s);
+        let mut switched = true;
+        match want {
+            Some(s) => {
+                if st.active.is_none() {
+                    st.before = if app.active.is_some() { app.before } else { current };
+                }
+                if !set_scenario(app, s) {
+                    return false;
+                }
+            }
+            None => {
+                let ours = if app.active.is_some() { app.before == st.active } else { current == st.active };
+                if let (Some(b), true) = (st.before, ours) {
+                    if !set_scenario(app, b) {
+                        return false;
+                    }
+                } else {
+                    switched = false;
+                }
+                st.before = None;
+            }
+        }
+        st.active = want;
+        switched
     }
 
     fn running_exes() -> Vec<String> {
