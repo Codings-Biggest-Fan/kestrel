@@ -4,6 +4,14 @@ Lightweight open-source control center for MSI laptops: scenarios, fans, battery
 lighting and monitoring. Native Rust + Slint, no .NET, no WebView. Budget: under 50 MB RAM with
 every window open.
 
+## Screenshots
+
+| Dashboard | Scenarios and profiles |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Scenarios](docs/screenshots/scenarios.png) |
+| **Settings and automation** | **Fan curve editor** |
+| ![Settings](docs/screenshots/settings.png) | ![Fan curve](docs/screenshots/fan-curve.png) |
+
 ## Install
 
 Step-by-step guide (download, running PowerShell as administrator, first run, undo): [docs/INSTALL.md](docs/INSTALL.md).
