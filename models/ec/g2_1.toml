@@ -1,0 +1,91 @@
+# Generated from msi-ec CONF_G2_1 (GPL-2.0-or-later). Do not edit by hand.
+id = "G2_1"
+wmi = "wmi2"
+firmware = [
+  { prefix = "14C4EMS1.1", models = "Prestige 14 A11SCX / A11SCS" },
+  { prefix = "14C6EMS1.1", models = "Prestige 14 Evo A12M" },
+  { prefix = "1581EMS1.1", models = "Katana GF66 11UE / 11UG" },
+  { prefix = "1582EMS1.1", models = "Pulse GL66 11UDK / Katana GF66 11UC / 11UD /" },
+  { prefix = "1583EMS1.1", models = "Crosshair 15 B12UEZ / B12UGSZ / Katana GF66 12UG / Pulse GL66 12UEK / 12UGK" },
+  { prefix = "1584EMS1.1", models = "Katana GF66 12U(C/D) (ENE)" },
+  { prefix = "1584IMS1.1", models = "Katana GF66 12UDO (ITE) (#467)" },
+  { prefix = "1585EMS1.1", models = "Creator M16 B13VF / Katana 15 B13VGK / Pulse 15 B13VGK" },
+  { prefix = "1585EMS2.1", models = "Katana 15 B12VEK / B12VFK / B12VGK" },
+  { prefix = "158NIMS1.1", models = "Bravo 15 C7UCX / C7V" },
+  { prefix = "158NIMS1.3", models = "Bravo 15 C7VFKP" },
+  { prefix = "158PIMS1.1", models = "Bravo 15 B7ED" },
+  { prefix = "158PIMS1.2", models = "Bravo 15 B7E" },
+  { prefix = "1591EMS1.1", models = "Summit E16 Flip A11UCT" },
+  { prefix = "1592EMS1.1", models = "Summit E16 Flip A12UCT / A12MT" },
+  { prefix = "1594EMS1.1", models = "Prestige 16 Studio A13VE" },
+  { prefix = "1596EMS1.1", models = "Summit E16 AI Studio A1VETG" },
+  { prefix = "15H2IMS1.1", models = "Modern 15 B12HW" },
+  { prefix = "15K1IMS1.1", models = "Cyborg 15 A12VF / A13VF(K)" },
+  { prefix = "16S6EMS1.1", models = "Prestige 15 A11SCX" },
+  { prefix = "16S8EMS1.1", models = "Prestige 15 A12SC / A12UC" },
+  { prefix = "16V6EMS1.1", models = "Stealth 15 A13V" },
+  { prefix = "17L1EMS1.1", models = "Crosshair 17 A11UEK / Katana GF76 11UE / 11UG" },
+  { prefix = "17L2EMS1.1", models = "Katana 17 B11UCX / Katana GF76 11UC / 11UD" },
+  { prefix = "17L3EMS1.1", models = "Crosshair 17 B12UGZ / Katana GF76 12UG / Pulse GL76 12U" },
+  { prefix = "17L4EMS1.1", models = "Katana GF76 12UC" },
+  { prefix = "17LNIMS1.1", models = "Bravo 17 C7VE" },
+  { prefix = "17LNIMS1.5", models = "Katana A17 AI B8VF" },
+  { prefix = "17M1EMS2.1", models = "Creator 17 B11UE" },
+]
+
+charge_control_address = 0xd7
+
+[webcam]
+address = 0x2e
+block_address = 0x2f
+bit = 1
+
+[fn_win_swap]
+address = 0xe8
+bit = 4
+invert = true
+
+[cooler_boost]
+address = 0x98
+bit = 7
+
+[shift_mode]
+address = 0xd2
+
+[shift_mode.modes]
+turbo = 0xc4
+eco = 0xc2
+comfort = 0xc1
+
+[super_battery]
+address = 0xeb
+mask = 0x0f
+
+[fan_mode]
+address = 0xd4
+
+[fan_mode.modes]
+auto = 0x0d
+silent = 0x1d
+advanced = 0x8d
+
+[cpu]
+rt_temp_address = 0x68
+rt_fan_speed_address = 0x71
+
+[gpu]
+rt_temp_address = 0x80
+rt_fan_speed_address = 0x89
+
+[leds]
+micmute_led_address = 0x2c
+mute_led_address = 0x2d
+bit = 1
+
+[kbd_bl]
+bl_mode_address = 0x2c
+bl_modes = [0x00, 0x08]
+max_mode = 1
+bl_state_address = 0xd3
+state_base_value = 0x80
+max_state = 3

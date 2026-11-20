@@ -1,0 +1,65 @@
+# Generated from msi-ec CONF_G2_0 (GPL-2.0-or-later). Do not edit by hand.
+id = "G2_0"
+wmi = "wmi2"
+firmware = [
+  { prefix = "14D2EMS1.1", models = "Modern 14 B11M" },
+  { prefix = "14D3EMS1.1", models = "Modern 14 B11MOU" },
+  { prefix = "1552EMS1.1", models = "Modern 15 A11M" },
+  { prefix = "159KIMS1.1", models = "Prestige A16 AI+ A3HMG / Summit A16 AI+ A3HMTG" },
+  { prefix = "15H1IMS1.2", models = "Modern 15 B12MO / B13M" },
+  { prefix = "15H4IMS1.1", models = "Modern 15 H B13M" },
+  { prefix = "15H5EMS1.1", models = "Modern 15 H AI C1MG" },
+]
+
+charge_control_address = 0xd7
+
+[webcam]
+address = 0x2e
+block_address = 0x2f
+bit = 1
+
+[fn_win_swap]
+address = 0xe8
+bit = 4
+invert = true
+
+[cooler_boost]
+address = 0x98
+bit = 7
+
+[shift_mode]
+address = 0xd2
+
+[shift_mode.modes]
+turbo = 0xc4
+eco = 0xc2
+comfort = 0xc1
+
+[super_battery]
+address = 0xeb
+mask = 0x0f
+
+[fan_mode]
+address = 0xd4
+
+[fan_mode.modes]
+auto = 0x0d
+silent = 0x1d
+advanced = 0x8d
+
+[cpu]
+rt_temp_address = 0x68
+rt_fan_speed_address = 0x71
+
+[leds]
+micmute_led_address = 0x2c
+mute_led_address = 0x2d
+bit = 1
+
+[kbd_bl]
+bl_mode_address = 0x2c
+bl_modes = [0x00, 0x08]
+max_mode = 1
+bl_state_address = 0xd3
+state_base_value = 0x80
+max_state = 3

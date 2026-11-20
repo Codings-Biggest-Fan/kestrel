@@ -1,0 +1,56 @@
+# Generated from msi-ec CONF_G1_10 (GPL-2.0-or-later). Do not edit by hand.
+id = "G1_10"
+wmi = "wmi1"
+firmware = [
+  { prefix = "16P5EMS1.1", models = "GE63 Raider 8RE" },
+  { prefix = "1782EMS1.1", models = "GT72 6QE Dominator Pro" },
+  { prefix = "1799EMS1.1", models = "GP72 7REX Leopard Pro" },
+]
+
+
+[webcam]
+address = 0x2e
+block_address = 0x2f
+bit = 1
+
+[fn_win_swap]
+address = 0xbf
+bit = 4
+invert = false
+
+[cooler_boost]
+address = 0x98
+bit = 7
+
+[shift_mode]
+address = 0xf2
+
+[shift_mode.modes]
+eco = 0xc2
+comfort = 0xc1
+sport = 0xc0
+
+[fan_mode]
+address = 0xf4
+
+[fan_mode.modes]
+auto = 0x0c
+basic = 0x4c
+advanced = 0x8c
+
+[cpu]
+rt_temp_address = 0x68
+rt_fan_speed_address = 0x71
+
+[gpu]
+rt_temp_address = 0x80
+rt_fan_speed_address = 0x89
+
+[leds]
+bit = 1
+
+[kbd_bl]
+bl_modes = [0x00, 0x08]
+max_mode = 1
+state_base_value = 0x80
+max_state = 3

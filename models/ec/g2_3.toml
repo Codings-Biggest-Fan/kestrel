@@ -1,0 +1,77 @@
+# Generated from msi-ec CONF_G2_3 (GPL-2.0-or-later). Do not edit by hand.
+id = "G2_3"
+wmi = "wmi2"
+firmware = [
+  { prefix = "13P3EMS1.1", models = "Summit E13 Flip A12MT" },
+  { prefix = "13P3EMS1.5", models = "Summit E13 Flip Evo A13MT" },
+  { prefix = "13P5EMS1.1", models = "Summit 13 AI+ Evo A2VM" },
+  { prefix = "13Q2EMS1.1", models = "Prestige 13 AI Evo A1MG" },
+  { prefix = "13Q3EMS1.1", models = "Prestige 13 AI+ Evo A2VMG" },
+  { prefix = "14F1EMS1.1", models = "Summit E14 Evo A12M / E14 Flip Evo A12MT" },
+  { prefix = "14F1EMS1.2", models = "Prestige 14 Evo B13M / Summit E14 Flip Evo A13MT" },
+  { prefix = "14J1IMS1.1", models = "Modern 14 C12M" },
+  { prefix = "14J1IMS1.2", models = "" },
+  { prefix = "14L1EMS1.3", models = "Modern 14 H D13M" },
+  { prefix = "14N1EMS1.1", models = "Prestige 14 AI Evo C1MG" },
+  { prefix = "14N1EMS1.3", models = "Prestige 14 AI Evo C2HMG" },
+  { prefix = "14Q2EMS1.3", models = "Venture 14 AI A2HMG" },
+  { prefix = "14QKIMS1.1", models = "Venture A14 AI+ A3HMG" },
+  { prefix = "14T2EMS1.1", models = "Prestige 14 Flip AI+ D3MTG" },
+  { prefix = "15A1EMS1.1", models = "Prestige 16 AI Evo B1MG" },
+  { prefix = "15A3EMS1.1", models = "Prestige 16 AI+ Evo B2VMG" },
+  { prefix = "15A3EBA1.1", models = "Prestige 16 AI+ MercedesAMG B2VMG" },
+  { prefix = "15QKIMS1.5", models = "Venture A15 AI A2HMG / A2HMTG" },
+]
+
+charge_control_address = 0xd7
+
+[webcam]
+address = 0x2e
+block_address = 0x2f
+bit = 1
+
+[fn_win_swap]
+address = 0xe8
+bit = 4
+invert = false
+
+[cooler_boost]
+address = 0x98
+bit = 7
+
+[shift_mode]
+address = 0xd2
+
+[shift_mode.modes]
+turbo = 0xc4
+eco = 0xc2
+comfort = 0xc1
+
+[super_battery]
+address = 0xeb
+mask = 0x0f
+
+[fan_mode]
+address = 0xd4
+
+[fan_mode.modes]
+auto = 0x0d
+silent = 0x1d
+advanced = 0x8d
+
+[cpu]
+rt_temp_address = 0x68
+rt_fan_speed_address = 0x71
+
+[leds]
+micmute_led_address = 0x2c
+mute_led_address = 0x2d
+bit = 1
+
+[kbd_bl]
+bl_mode_address = 0x2c
+bl_modes = [0x00, 0x08]
+max_mode = 1
+bl_state_address = 0xd3
+state_base_value = 0x80
+max_state = 3
