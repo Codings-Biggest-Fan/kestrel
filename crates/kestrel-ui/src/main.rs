@@ -62,6 +62,7 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_model_name(if s.model.name.is_empty() { "MSI laptop".into() } else { s.model.name.clone().into() });
     ui.set_firmware(s.model.firmware.clone().into());
     ui.set_read_only(s.model.read_only);
+    ui.set_firmware_changed(s.model.firmware_changed);
     ui.set_supported(s.model.map_id.is_some());
     if !s.caps.scenarios.is_empty() && *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) != s.caps.scenarios {
         show_scenarios(ui, s.caps.scenarios.clone());
@@ -566,6 +567,15 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_cpu_power(move |s, b| {
         let (s, b) = kestrel_core::cpu_power::clamp(s.max(0) as u32, b.max(0) as u32);
         cpu_command(w.clone(), Request::SetCpuPower { sustained_w: s, boost_w: b }, Some((s, b)));
+    });
+    let w = ui.as_weak();
+    ui.on_confirm_firmware(move || {
+        let w = w.clone();
+        std::thread::spawn(move || {
+            let r = kestrel_core::transport::client().and_then(|mut c| c.command(&Request::ConfirmFirmware));
+            let msg: SharedString = r.err().map(|e| e.to_string()).unwrap_or_default().into();
+            let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
+        });
     });
     let w = ui.as_weak();
     ui.on_reset_cpu_power(move || cpu_command(w.clone(), Request::ResetCpuPower, None));

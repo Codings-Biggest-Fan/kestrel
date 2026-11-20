@@ -23,6 +23,7 @@ pub enum Request {
     SetFanCurve { gpu: bool, speeds: Vec<u8> },
     /// Put every register Kestrel changed back to its original value.
     RestoreDefaults,
+    ConfirmFirmware,
     GetLighting,
     /// Static colour on a USB RGB device; `brightness` 0–100, 0 turns it off.
     SetLighting { device: String, color: [u8; 3], brightness: u8 },
@@ -77,6 +78,10 @@ pub struct ModelInfo {
     pub wmi: Option<WmiGen>,
     /// Unknown models and models without a verified map never get EC writes.
     pub read_only: bool,
+    /// The EC firmware differs from the one the map was confirmed on; writes stay off
+    /// until the owner confirms with `ConfirmFirmware`.
+    #[serde(default)]
+    pub firmware_changed: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

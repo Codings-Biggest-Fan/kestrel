@@ -98,6 +98,10 @@ impl MsiEc {
         self.io.read(addr)
     }
 
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
+    }
+
     pub fn read_only(&self) -> bool {
         self.read_only
     }
