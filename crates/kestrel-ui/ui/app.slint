@@ -368,9 +368,8 @@ export component AppWindow inherits Window {
                         HorizontalLayout { spacing: 8px; alignment: start;
                             for v in [0, 25, 50, 75, 100]: Pill { width: 64px; label: v == 0 ? "Off" : v + "%"; selected: light-bright == v; clicked => { light-bright = v; } } }
                         HorizontalLayout { spacing: 8px; alignment: start;
-                            Pill { width: 120px; label: "Apply"; selected: true; enabled: connected; clicked => { set-light(lights[light-sel].id, light-swatch, light-bright); } }
-                            Pill { width: 120px; label: "Rescan"; clicked => { load-lights(); } } } }
-                    if lights.length == 0: Pill { width: 120px; label: "Rescan"; clicked => { load-lights(); } } }
+                            Pill { width: 120px; label: "Apply"; selected: true; enabled: connected; clicked => { set-light(lights[light-sel].id, light-swatch, light-bright); } } } }
+                    HorizontalLayout { alignment: start; Pill { width: 120px; label: "Rescan"; clicked => { load-lights(); } } } }
                 Rectangle {}
             }
 
