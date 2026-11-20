@@ -4,6 +4,10 @@ Lightweight open-source control center for MSI laptops: scenarios, fans, battery
 lighting and monitoring. Native Rust + Slint, no .NET, no WebView. Budget: under 50 MB RAM with
 every window open.
 
+## Install
+
+Step-by-step guide (download, running PowerShell as administrator, first run, undo): [docs/INSTALL.md](docs/INSTALL.md).
+
 ## Processes
 
 | Binary | Role | Runs |

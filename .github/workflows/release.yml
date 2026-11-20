@@ -27,3 +27,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          body: |
+            **How to install and run (PowerShell as administrator, first run, undo):** [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/main/docs/INSTALL.md)
