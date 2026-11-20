@@ -8,8 +8,10 @@
 //!   (mock modes also simulate a Sound BlasterX G6)
 //!   kestrel-svc install|uninstall  register / remove the Windows service
 
+mod drivers;
 #[cfg(windows)]
 mod hid_win;
+mod lighting;
 mod server;
 #[cfg(windows)]
 mod service;

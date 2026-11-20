@@ -1,6 +1,7 @@
 //! kestrel-ui: main window. Talks to kestrel-svc over IPC and exits when closed.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+use kestrel_core::automation::{AppRule, Automation};
 use kestrel_core::creative::{AudioSetting, Effect, Output};
 use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
@@ -201,6 +202,135 @@ fn ints(v: &[u8]) -> ModelRc<i32> {
     ))
 }
 
+const SWATCHES: [[u8; 3]; 8] = [
+    [255, 32, 32],
+    [255, 128, 0],
+    [255, 220, 0],
+    [32, 255, 64],
+    [0, 220, 255],
+    [32, 64, 255],
+    [170, 48, 255],
+    [255, 255, 255],
+];
+
+fn load_lights(weak: Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        let r = kestrel_core::transport::client().and_then(|mut c| c.call(&Request::GetLighting));
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if let Ok(Response::Lighting(devs)) = r {
+                let first = devs.iter().position(|d| d.supported).unwrap_or(0);
+                let items: Vec<LightItem> = devs
+                    .into_iter()
+                    .map(|d| LightItem {
+                        id: d.id.into(),
+                        name: d.name.into(),
+                        kind: d.kind.into(),
+                        supported: d.supported,
+                    })
+                    .collect();
+                ui.set_lights(ModelRc::new(VecModel::from(items)));
+                ui.set_light_sel(first as i32);
+            }
+        });
+    });
+}
+
+fn show_rules(ui: &AppWindow, rules: &[AppRule]) {
+    let items: Vec<SharedString> = rules
+        .iter()
+        .map(|r| format!("{}  →  {}", r.exe, r.scenario.label()).into())
+        .collect();
+    ui.set_rules(ModelRc::new(VecModel::from(items)));
+}
+
+fn load_lid(weak: Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        let lid = kestrel_core::power::lid_actions();
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            let (ac, dc) = lid
+                .as_ref()
+                .map_or((-1, -1), |&(a, d)| (i32::from(a), i32::from(d)));
+            ui.set_lid_ac(ac);
+            ui.set_lid_dc(dc);
+            ui.set_lid_error(lid.err().unwrap_or_default().into());
+        });
+    });
+}
+
+static DRIVER_IDS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn driver_call(weak: Weak<AppWindow>, req: Request) {
+    if let Some(ui) = weak.upgrade() {
+        ui.set_driver_busy(true);
+        ui.set_driver_status(
+            if matches!(req, Request::GetDriverUpdates) {
+                "Searching Windows Update…"
+            } else {
+                "Downloading and installing…"
+            }
+            .into(),
+        );
+    }
+    std::thread::spawn(move || {
+        let r = kestrel_core::transport::client().and_then(|mut c| c.call(&req));
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            ui.set_driver_busy(false);
+            let status = match r {
+                Ok(Response::Drivers(list)) => {
+                    let titles: Vec<SharedString> = list.iter().map(|d| d.title.clone().into()).collect();
+                    *DRIVER_IDS.lock().unwrap_or_else(|p| p.into_inner()) = list.into_iter().map(|d| d.id).collect();
+                    ui.set_drivers(ModelRc::new(VecModel::from(titles.clone())));
+                    if titles.is_empty() { "All drivers are up to date.".to_string() } else { format!("{} update(s) available.", titles.len()) }
+                }
+                Ok(Response::Installed { reboot, failed }) => {
+                    DRIVER_IDS.lock().unwrap_or_else(|p| p.into_inner()).clear();
+                    ui.set_drivers(ModelRc::default());
+                    let done = if failed {
+                        "Some drivers did not install. Click Check for updates to see which are left."
+                    } else {
+                        "Installed."
+                    };
+                    if reboot { format!("{done} Restart Windows to finish.") } else { done.to_string() }
+                }
+                Ok(Response::Error(e)) => e,
+                Ok(_) => "Unexpected reply from the service.".into(),
+                Err(e) => e.to_string(),
+            };
+            ui.set_driver_status(status.into());
+        });
+    });
+}
+
+fn load_gpu(weak: Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        let r = kestrel_core::gpu::query();
+        let _ = weak.upgrade_in_event_loop(move |ui| match r {
+            Ok(g) => {
+                let opt = |v: Option<u32>, unit: &str| {
+                    v.map_or("–".to_string(), |v| format!("{v} {unit}"))
+                };
+                let power = g.power_w.map_or("–".to_string(), |w| format!("{w:.1} W"));
+                ui.set_gpu_stats(
+                    format!(
+                        "{} · {} · {} load · core {} · memory {} · {}",
+                        opt(g.temp_c, "°C"),
+                        power,
+                        opt(g.load_pct, "%"),
+                        opt(g.core_mhz, "MHz"),
+                        opt(g.mem_mhz, "MHz"),
+                        g.pstate
+                    )
+                    .into(),
+                );
+                ui.set_gpu_name(g.name.into());
+                ui.set_gpu_driver(g.driver.into());
+                ui.set_gpu_error(SharedString::default());
+            }
+            Err(e) => ui.set_gpu_error(e.into()),
+        });
+    });
+}
+
 static CURVE_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// Only the newest load for the selected fan may fill the editor; Apply stays disabled
@@ -259,6 +389,132 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_charge(move |p| send(w.clone(), Request::SetChargeLimit(p.clamp(10, 100) as u8)));
     let w = ui.as_weak();
     ui.on_set_kbd(move |l| send(w.clone(), Request::SetKbdBacklight(l.clamp(0, 3) as u8)));
+    ui.set_swatches(ModelRc::new(VecModel::from(
+        SWATCHES
+            .iter()
+            .map(|&[r, g, b]| slint::Color::from_rgb_u8(r, g, b))
+            .collect::<Vec<_>>(),
+    )));
+    let w = ui.as_weak();
+    ui.on_load_lights(move || load_lights(w.clone()));
+    let w = ui.as_weak();
+    ui.on_set_light(move |id, swatch, bright| {
+        let color = SWATCHES[(swatch.max(0) as usize).min(SWATCHES.len() - 1)];
+        send(
+            w.clone(),
+            Request::SetLighting {
+                device: id.to_string(),
+                color,
+                brightness: bright.clamp(0, 100) as u8,
+            },
+        );
+    });
+    load_lights(ui.as_weak());
+    let auto = Automation::load();
+    let idx = |s: Option<Scenario>| s.map_or(-1, |s| s.index() as i32);
+    ui.set_auto_bat(idx(auto.battery_scenario));
+    ui.set_auto_ac(idx(auto.ac_scenario));
+    ui.set_auto_60hz(auto.battery_60hz);
+    let w = ui.as_weak();
+    ui.on_set_auto(move |bat, ac, hz60| {
+        let pick = |i: i32| usize::try_from(i).ok().and_then(Scenario::from_index);
+        let a = Automation {
+            battery_scenario: pick(bat),
+            ac_scenario: pick(ac),
+            battery_60hz: hz60,
+            ..Automation::load()
+        };
+        let msg: SharedString = a
+            .save()
+            .err()
+            .map(|e| format!("Could not save automation: {e}"))
+            .unwrap_or_default()
+            .into();
+        if let Some(ui) = w.upgrade() {
+            ui.set_message(msg);
+        }
+    });
+    let w = ui.as_weak();
+    ui.on_set_lid(move |ac, v| {
+        let w = w.clone();
+        std::thread::spawn(move || {
+            let r = kestrel_core::power::set_lid_action(ac, v.clamp(0, 3) as u8);
+            let msg: SharedString = r.err().unwrap_or_default().into();
+            let w2 = w.clone();
+            let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
+            load_lid(w2);
+        });
+    });
+    load_lid(ui.as_weak());
+    show_rules(&ui, &auto.app_rules);
+    let w = ui.as_weak();
+    ui.on_add_rule(move |exe, scenario| {
+        let Some(ui) = w.upgrade() else { return };
+        let exe = exe.trim().to_ascii_lowercase();
+        let exe = if exe.ends_with(".exe") {
+            exe
+        } else {
+            format!("{exe}.exe")
+        };
+        let Some(scenario) = usize::try_from(scenario)
+            .ok()
+            .and_then(Scenario::from_index)
+        else {
+            return;
+        };
+        if exe == ".exe" {
+            return;
+        }
+        let mut a = Automation::load();
+        a.app_rules.retain(|r| !r.exe.eq_ignore_ascii_case(&exe));
+        a.app_rules.push(AppRule { exe, scenario });
+        ui.set_message(
+            a.save()
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default()
+                .into(),
+        );
+        show_rules(&ui, &a.app_rules);
+    });
+    let w = ui.as_weak();
+    ui.on_remove_rule(move |i| {
+        let Some(ui) = w.upgrade() else { return };
+        let mut a = Automation::load();
+        if let Ok(i) = usize::try_from(i) {
+            if i < a.app_rules.len() {
+                a.app_rules.remove(i);
+            }
+        }
+        ui.set_message(
+            a.save()
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default()
+                .into(),
+        );
+        show_rules(&ui, &a.app_rules);
+    });
+    let w = ui.as_weak();
+    ui.on_load_gpu(move || load_gpu(w.clone()));
+    ui.on_open_driver_page(|| {
+        #[cfg(windows)]
+        let _ = std::process::Command::new("explorer")
+            .arg(kestrel_core::gpu::DRIVER_PAGE)
+            .spawn();
+        #[cfg(not(windows))]
+        let _ = std::process::Command::new("xdg-open")
+            .arg(kestrel_core::gpu::DRIVER_PAGE)
+            .spawn();
+    });
+    load_gpu(ui.as_weak());
+    let w = ui.as_weak();
+    ui.on_check_drivers(move || driver_call(w.clone(), Request::GetDriverUpdates));
+    let w = ui.as_weak();
+    ui.on_install_drivers(move || {
+        let ids = DRIVER_IDS.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        driver_call(w.clone(), Request::InstallDriverUpdates(ids));
+    });
     let w = ui.as_weak();
     ui.on_set_audio_output(move |o| {
         let o = if o == 1 {
