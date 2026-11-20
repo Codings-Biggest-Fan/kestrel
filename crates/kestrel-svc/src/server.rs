@@ -115,6 +115,25 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
     match req {
         Request::Hello { .. } => Response::Hello { protocol: PROTOCOL_VERSION, version: kestrel_core::VERSION.into() },
         Request::GetStatus => Response::Status(Box::new(status(st))),
+        Request::RestoreDefaults if st.model.firmware_changed => {
+            Response::Error("Confirm the new EC firmware in Settings before restoring saved values.".into())
+        }
+        Request::ConfirmFirmware => {
+            if !st.model.firmware_changed {
+                return Response::Ok;
+            }
+            let mut s = crate::settings::Settings::load();
+            s.known_firmware = Some(st.model.firmware.clone());
+            if let Err(e) = s.save() {
+                return Response::Error(format!("couldn't save settings: {e}"));
+            }
+            if let Some(ec) = st.ec.as_mut() {
+                ec.set_read_only(false);
+            }
+            st.model.firmware_changed = false;
+            st.model.read_only = false;
+            Response::Ok
+        }
         Request::SetScenario(s) => {
             let r = apply_scenario(st, s);
             if r.is_ok() {

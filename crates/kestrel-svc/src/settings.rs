@@ -8,6 +8,9 @@ pub struct Settings {
     /// Firmware prefixes whose experimental (untested) map the owner opted into.
     #[serde(default)]
     pub allow_experimental: Vec<String>,
+    /// Full EC firmware string the verified map was last confirmed on.
+    #[serde(default)]
+    pub known_firmware: Option<String>,
 }
 
 pub fn data_dir() -> PathBuf {
@@ -24,6 +27,14 @@ pub fn data_dir() -> PathBuf {
 }
 
 impl Settings {
+    pub fn save(&self) -> std::io::Result<()> {
+        let dir = data_dir();
+        std::fs::create_dir_all(&dir)?;
+        let tmp = dir.join("settings.json.tmp");
+        std::fs::write(&tmp, serde_json::to_string_pretty(self).map_err(std::io::Error::other)?)?;
+        std::fs::rename(tmp, dir.join("settings.json"))
+    }
+
     pub fn load() -> Self {
         std::fs::read_to_string(data_dir().join("settings.json"))
             .ok()

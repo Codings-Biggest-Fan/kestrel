@@ -93,7 +93,7 @@ fn open_backend(mock_fw: Option<String>) -> Result<(Box<dyn EcIo>, String), Stri
 }
 
 fn init(mock_fw: Option<String>) -> State {
-    let settings = settings::Settings::load();
+    let mut settings = settings::Settings::load();
     let mut model = ModelInfo { read_only: true, ..Default::default() };
     let ec = match open_backend(mock_fw) {
         Ok((io, fw)) => {
@@ -105,9 +105,23 @@ fn init(mock_fw: Option<String>) -> State {
                     model.name = m.firmware.models.clone();
                     model.map_id = Some(m.conf.id.clone());
                     model.wmi = Some(m.conf.wmi);
-                    model.read_only = !allowed;
+                    // A BIOS/EC update can move registers even when the prefix still matches.
+                    let mut changed = allowed && settings.known_firmware.as_deref().is_some_and(|k| k != fw);
+                    if allowed && settings.known_firmware.is_none() {
+                        settings.known_firmware = Some(fw.clone());
+                        if let Err(e) = settings.save() {
+                            // Without a saved baseline a later update would go unnoticed.
+                            eprintln!("couldn't save settings: {e}");
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        eprintln!("EC firmware changed since it was confirmed; read-only until confirmed");
+                    }
+                    model.firmware_changed = changed;
+                    model.read_only = !allowed || changed;
                     let journal = Journal::open(settings::data_dir().join("journal.json")).unwrap_or_default();
-                    Some(MsiEc::new(io, m.conf.clone(), journal, !allowed))
+                    Some(MsiEc::new(io, m.conf.clone(), journal, model.read_only))
                 }
                 None => {
                     model.name = "Unknown model".into();

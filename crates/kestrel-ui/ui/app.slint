@@ -139,6 +139,8 @@ export component AppWindow inherits Window {
     in property <string> model-name: "Connecting…";
     in property <string> firmware;
     in property <bool> read-only: true;
+    in property <bool> firmware-changed;
+    callback confirm-firmware();
     in property <bool> supported;
     property <bool> can-write: connected && supported && !read-only;
     in property <string> message;
@@ -491,6 +493,9 @@ export component AppWindow inherits Window {
                 Card { title: "THIS LAPTOP";
                     Text { text: model-name; color: Theme.text; font-size: 16px; font-weight: 600; }
                     Text { text: "EC firmware " + firmware; color: Theme.muted; }
+                    if firmware-changed: Text { wrap: word-wrap; color: Theme.warn;
+                        text: "The EC firmware changed (BIOS update?) since this laptop's map was confirmed, so Kestrel is read-only. Check that temperatures and fan speeds on the Dashboard look right, then confirm."; }
+                    if firmware-changed: Pill { width: 220px; label: "Values look right, allow writes"; selected: true; clicked => { confirm-firmware(); } }
                     if connected && !supported: Text { wrap: word-wrap; color: Theme.warn;
                         text: "Unknown model: no register map matches this firmware, so Kestrel only shows system stats."; }
                     if connected && supported && read-only: Text { wrap: word-wrap; color: Theme.warn;
