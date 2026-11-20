@@ -77,8 +77,11 @@ impl WmiEc {
                 .map_err(err)?;
             let mut objs = [None];
             let mut n = 0u32;
-            let _ = en.Next(WBEM_INFINITE, &mut objs, &mut n);
-            let inst = objs[0].take().ok_or(EcError::Unsupported("MSI_ACPI WMI interface"))?;
+            let hr = en.Next(WBEM_INFINITE, &mut objs, &mut n);
+            let inst = objs[0].take().ok_or_else(|| {
+                // 0x80041010 = class not registered (BIOS MOF missing); S_FALSE (0x1) = class with no instance.
+                EcError::Io(format!("MSI_ACPI: no instance in root\\wmi (Next returned 0x{:08x}, {n} objects)", hr.0 as u32))
+            })?;
             let path = get_bstr(&inst, "__PATH")?;
 
             let mut acpi_class = None;
