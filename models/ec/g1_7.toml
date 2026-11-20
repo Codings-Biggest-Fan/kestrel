@@ -1,0 +1,65 @@
+# Generated from msi-ec CONF_G1_7 (GPL-2.0-or-later). Do not edit by hand.
+id = "G1_7"
+wmi = "wmi1"
+firmware = [
+  { prefix = "16R1EMS1.1", models = "GF63 8RC-249" },
+  { prefix = "16R3EMS1.1", models = "GF63 Thin 9SC" },
+  { prefix = "16R4EMS1.1", models = "GF63 Thin 10SCX(R) / 10SCS(R)" },
+  { prefix = "16R4EMS2.1", models = "GF63 Thin 9SCSR" },
+  { prefix = "16R5EMS1.1", models = "GF63 Thin 10U(C/D) / 10SC" },
+  { prefix = "16W1EMS1.1", models = "GF65 Thin 9SE(X(R)) / 9SD" },
+  { prefix = "16W1EMS2.1", models = "GF65 Thin 10SCSXR / 10SD(R) / 10SE(R)" },
+  { prefix = "16W2EMS1.1", models = "GF65 Thin 10UE" },
+]
+
+charge_control_address = 0xef
+
+[webcam]
+address = 0x2e
+block_address = 0x2f
+bit = 1
+
+[fn_win_swap]
+address = 0xbf
+bit = 4
+invert = true
+
+[cooler_boost]
+address = 0x98
+bit = 7
+
+[shift_mode]
+address = 0xf2
+
+[shift_mode.modes]
+turbo = 0xc4
+eco = 0xc2
+comfort = 0xc1
+sport = 0xc0
+
+[fan_mode]
+address = 0xf4
+
+[fan_mode.modes]
+auto = 0x0d
+silent = 0x1d
+basic = 0x4d
+advanced = 0x8d
+
+[cpu]
+rt_temp_address = 0x68
+rt_fan_speed_address = 0x71
+
+[gpu]
+rt_temp_address = 0x80
+rt_fan_speed_address = 0x89
+
+[leds]
+bit = 1
+
+[kbd_bl]
+bl_modes = [0x00, 0x08]
+max_mode = 1
+bl_state_address = 0xf3
+state_base_value = 0x80
+max_state = 3

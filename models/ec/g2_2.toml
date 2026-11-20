@@ -1,0 +1,69 @@
+# Generated from msi-ec CONF_G2_2 (GPL-2.0-or-later). Do not edit by hand.
+id = "G2_2"
+wmi = "wmi2"
+firmware = [
+  { prefix = "1543EMS1.1", models = "GE66 Raider 11UE / GP66 Leopard 11UG / 11UH" },
+  { prefix = "1544EMS1.1", models = "Vector GP66 12UGS" },
+  { prefix = "1545IMS1.1", models = "Raider GE67 HX 12U" },
+  { prefix = "16V4EMS1.1", models = "GS66 Stealth 11UE / 11UG" },
+  { prefix = "16V4EMS2.1", models = "Creator 15 A11UE" },
+  { prefix = "16V5EMS1.1", models = "Stealth GS66 12UE / 12UGS" },
+  { prefix = "17K3EMS1.1", models = "GE76 Raider 11U / 11UE / 11UH / GP76 Leopard 11UG" },
+  { prefix = "17K4EMS1.1", models = "Raider GE76 12UE / 12UGS / Vector GP76 12UH" },
+  { prefix = "17K5IMS1.1", models = "Raider GE77 HX 12UGS" },
+  { prefix = "17KKIMS1.1", models = "Alpha 17 C7VF / C7VG" },
+  { prefix = "17M1EMS1.1", models = "Stealth GS76 11UG" },
+]
+
+charge_control_address = 0xd7
+
+[webcam]
+address = 0x2e
+block_address = 0x2f
+bit = 1
+
+[fn_win_swap]
+address = 0xe8
+bit = 4
+invert = true
+
+[cooler_boost]
+address = 0x98
+bit = 7
+
+[shift_mode]
+address = 0xd2
+
+[shift_mode.modes]
+turbo = 0xc4
+eco = 0xc2
+comfort = 0xc1
+
+[super_battery]
+address = 0xeb
+mask = 0x0f
+
+[fan_mode]
+address = 0xd4
+
+[fan_mode.modes]
+auto = 0x0d
+silent = 0x1d
+advanced = 0x8d
+
+[cpu]
+rt_temp_address = 0x68
+rt_fan_speed_address = 0x71
+
+[gpu]
+rt_temp_address = 0x80
+rt_fan_speed_address = 0x89
+
+[leds]
+bit = 1
+
+[kbd_bl]
+bl_modes = []
+max_mode = 1
+state_base_value = 0x80
+max_state = 3

@@ -1,0 +1,66 @@
+# Generated from msi-ec CONF_G2_6 (GPL-2.0-or-later). Do not edit by hand.
+id = "G2_6"
+wmi = "wmi2"
+firmware = [
+  { prefix = "16R6EMS1.1", models = "GF63 Thin 11UC / 11SC" },
+  { prefix = "16R7IMS1.0", models = "Thin GF63 12HW" },
+  { prefix = "16R7IMS1.1", models = "" },
+  { prefix = "16R8IMS1.1", models = "Thin GF63 12UC(X) / 12V(E/F)" },
+  { prefix = "16R8IMS2.1", models = "Thin 15 B12UCX / B12VE" },
+  { prefix = "16RKIMS1.1", models = "Thin A15 B7VF" },
+  { prefix = "16RKIMS2.1", models = "" },
+]
+
+charge_control_address = 0xd7
+
+[webcam]
+address = 0x2e
+block_address = 0x2f
+bit = 1
+
+[fn_win_swap]
+address = 0xe8
+bit = 4
+invert = true
+
+[cooler_boost]
+address = 0x98
+bit = 7
+
+[shift_mode]
+address = 0xd2
+
+[shift_mode.modes]
+turbo = 0xc4
+eco = 0xc2
+comfort = 0xc1
+
+[super_battery]
+address = 0xeb
+mask = 0x0f
+
+[fan_mode]
+address = 0xd4
+
+[fan_mode.modes]
+auto = 0x0d
+silent = 0x1d
+advanced = 0x8d
+
+[cpu]
+rt_temp_address = 0x68
+rt_fan_speed_address = 0x71
+
+[gpu]
+rt_temp_address = 0x80
+rt_fan_speed_address = 0x89
+
+[leds]
+bit = 1
+
+[kbd_bl]
+bl_modes = []
+max_mode = 1
+bl_state_address = 0xd3
+state_base_value = 0x80
+max_state = 3
