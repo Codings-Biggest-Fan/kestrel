@@ -6,6 +6,7 @@
 //!   kestrel-svc --mock <FW_ID>     foreground with an in-memory EC (development, CI)
 //!   kestrel-svc install|uninstall  register / remove the Windows service
 
+mod cpu_power;
 mod drivers;
 mod lighting;
 mod server;

@@ -47,6 +47,13 @@ fn handle(mut stream: Stream, state: Shared) {
     }
     while let Ok(req) = read_frame::<_, Request>(&mut stream) {
         let resp = match req {
+            Request::GetCpuPower => Response::CpuPower(crate::cpu_power::info()),
+            Request::SetCpuPower { sustained_w, boost_w } => {
+                let r = crate::cpu_power::set(sustained_w, boost_w);
+                eprintln!("SetCpuPower {sustained_w}/{boost_w} W -> {r:?}");
+                r.map_or_else(Response::Error, |()| Response::Ok)
+            }
+            Request::ResetCpuPower => crate::cpu_power::reset().map_or_else(Response::Error, |()| Response::Ok),
             Request::GetDriverUpdates => match crate::drivers::list() {
                 Ok(d) => Response::Drivers(d),
                 Err(e) => Response::Error(e),
@@ -118,7 +125,9 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
         Request::SetCoolerBoost(on) => result(with_ec(st, |ec| ec.set_cooler_boost(on))),
         Request::SetChargeLimit(p) => result(with_ec(st, |ec| ec.set_charge_limit(p))),
         Request::GetLighting => Response::Lighting(crate::lighting::list()),
-        Request::GetDriverUpdates | Request::InstallDriverUpdates(_) => Response::Error("driver requests are handled per connection".into()),
+        Request::GetDriverUpdates | Request::InstallDriverUpdates(_) | Request::GetCpuPower | Request::SetCpuPower { .. } | Request::ResetCpuPower => {
+            Response::Error("handled per connection".into())
+        }
         Request::SetLighting { device, color, brightness } => match crate::lighting::set(&device, color, brightness) {
             Ok(()) => Response::Ok,
             Err(e) => Response::Error(e),
