@@ -88,6 +88,13 @@ mod win {
         }
     }
 
+    fn battery_pct() -> Option<u8> {
+        use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+        let mut s = SYSTEM_POWER_STATUS::default();
+        unsafe { GetSystemPowerStatus(&mut s) }.ok()?;
+        (s.BatteryLifePercent <= 100).then_some(s.BatteryLifePercent)
+    }
+
     fn on_ac() -> Option<bool> {
         use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
         let mut s = SYSTEM_POWER_STATUS::default();
@@ -104,6 +111,7 @@ mod win {
         // `None` first, so the settings for the current power source apply when the tray starts.
         let mut last: Option<bool> = None;
         let mut app = AppState::default();
+        let mut low_active = false;
         loop {
             let now = on_ac();
             if let Some(ac) = now {
@@ -117,6 +125,20 @@ mod win {
                     if sent {
                         last = Some(ac);
                     }
+                }
+            }
+            if let Some(ac) = now {
+                let auto = Automation::load();
+                match auto.low_battery_scenario(ac, battery_pct()) {
+                    Some(s) if !low_active => low_active = send(Request::SetScenario(s)).is_ok(),
+                    None if low_active => {
+                        low_active = false;
+                        // Still on battery (e.g. the threshold was lowered): back to the battery scenario.
+                        if let (false, Some(s)) = (ac, auto.battery_scenario) {
+                            let _ = send(Request::SetScenario(s));
+                        }
+                    }
+                    _ => {}
                 }
             }
             apply_app_rules(&mut app);
