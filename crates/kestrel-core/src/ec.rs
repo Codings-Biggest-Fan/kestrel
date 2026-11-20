@@ -271,6 +271,39 @@ impl MsiEc {
         Ok([rpm(t.cpu_address)?, rpm(t.gpu_address)?])
     }
 
+    /// EC fan curve for `gpu == false` (CPU) or `true` (GPU): (temps °C, speeds %).
+    pub fn fan_curve(&mut self, gpu: bool) -> Result<(Vec<u8>, Vec<u8>)> {
+        let m = self.conf.fan_curve.ok_or(EcError::Unsupported("fan curve"))?;
+        let (tb, sb) = if gpu { (m.gpu_temp_base, m.gpu_speed_base) } else { (m.cpu_temp_base, m.cpu_speed_base) };
+        let n = m.points as usize;
+        let mut t = vec![0; n];
+        let mut sp = vec![0; n];
+        self.io.read_seq(tb, &mut t)?;
+        self.io.read_seq(sb, &mut sp)?;
+        Ok((t, sp))
+    }
+
+    /// Write fan-curve speeds only; temperature breakpoints stay as the firmware set them.
+    /// Speeds must be 0-100 % and non-decreasing.
+    pub fn set_fan_curve_speeds(&mut self, gpu: bool, speeds: &[u8]) -> Result<()> {
+        let m = self.conf.fan_curve.ok_or(EcError::Unsupported("fan curve"))?;
+        if speeds.len() != m.points as usize
+            || speeds.iter().any(|&v| v > 100)
+            || speeds.windows(2).any(|w| w[1] < w[0])
+        {
+            return Err(EcError::InvalidValue(format!("fan curve {speeds:?}")));
+        }
+        let (_, current) = self.fan_curve(gpu)?;
+        if current.iter().any(|&v| v > 150) {
+            return Err(EcError::InvalidValue(format!("fan curve table holds {current:?}; not writing")));
+        }
+        let base = if gpu { m.gpu_speed_base } else { m.cpu_speed_base };
+        for (i, &v) in speeds.iter().enumerate() {
+            self.write(base + i as u8, v)?;
+        }
+        Ok(())
+    }
+
     /// Write every journaled register back to its original value.
     pub fn restore(&mut self) -> Result<usize> {
         let entries: Vec<_> = self.journal.entries().collect();
@@ -350,6 +383,20 @@ mod tests {
             // Simulates firmware that ignores writes to 0x98.
             if a == 0x98 { Ok(()) } else { self.0.write(a, v) }
         }
+    }
+
+    #[test]
+    fn vector_fan_curve_speeds_are_validated_and_journaled() {
+        let mut e = ec("15MMIMS1.103");
+        assert_eq!(e.fan_curve(false).unwrap().1.len(), 6);
+        assert!(e.set_fan_curve_speeds(false, &[0, 40, 30, 60, 80, 100]).is_err());
+        assert!(e.set_fan_curve_speeds(false, &[0, 40, 50, 60, 80, 101]).is_err());
+        assert!(e.set_fan_curve_speeds(false, &[0, 40]).is_err());
+        e.set_fan_curve_speeds(false, &[0, 40, 50, 60, 80, 100]).unwrap();
+        assert_eq!(e.fan_curve(false).unwrap().1, vec![0, 40, 50, 60, 80, 100]);
+        assert_eq!(e.journal.entries().count(), 6);
+        e.restore().unwrap();
+        assert_eq!(e.fan_curve(false).unwrap().1, vec![0; 6]);
     }
 
     #[test]
