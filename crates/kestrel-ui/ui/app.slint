@@ -100,15 +100,19 @@ component Gauge inherits Card {
     }
 }
 
+// 60-sample bar history (0..1, oldest first), newest bar at the right edge.
 component Sparkline inherits Rectangle {
-    in property <string> commands; // SVG path in a 100x100 box
+    in property <[float]> points;
     in property <color> stroke: Theme.accent;
     height: 70px;
-    if commands != "": Path {
-        width: 100%; height: 100%;
-        viewbox-width: 100; viewbox-height: 100;
-        stroke: stroke; stroke-width: 2px;
-        commands: commands;
+    property <length> slot: self.width / 60;
+    for v[i] in points: Rectangle {
+        x: root.width - (points.length - i) * slot;
+        width: max(1px, slot - 2px);
+        height: max(2px, v * root.height);
+        y: root.height - self.height;
+        border-radius: 2px;
+        background: stroke.with-alpha(0.35 + 0.65 * (i + 1) / max(1, points.length));
     }
 }
 
@@ -154,8 +158,8 @@ export component AppWindow inherits Window {
     in property <float> ram-f;
     in property <string> battery: "–";
     in property <string> power-source;
-    in property <string> cpu-history;
-    in property <string> temp-history;
+    in property <[float]> cpu-history;
+    in property <[float]> temp-history;
     in property <bool> has-boost;
     in property <bool> cooler-boost;
     in property <bool> has-charge;
@@ -236,8 +240,8 @@ export component AppWindow inherits Window {
                 }
                 HorizontalLayout {
                     spacing: 16px;
-                    Card { title: "CPU TEMPERATURE · 60 S"; Sparkline { commands: temp-history; } }
-                    Card { title: "CPU LOAD · 60 S"; Sparkline { commands: cpu-history; stroke: Theme.blue; } }
+                    Card { title: "CPU TEMPERATURE · 60 S"; Sparkline { points: temp-history; } }
+                    Card { title: "CPU LOAD · 60 S"; Sparkline { points: cpu-history; stroke: Theme.blue; } }
                 }
                 HorizontalLayout {
                     spacing: 16px;

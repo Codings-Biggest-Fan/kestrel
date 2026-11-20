@@ -32,18 +32,8 @@ fn fan(rpm: Option<u32>, pct: Option<u8>) -> SharedString {
     }
 }
 
-/// SVG path for values in 0..1 across a 100x100 viewbox; the newest sample is at the right edge.
-fn spark(q: &VecDeque<f32>) -> SharedString {
-    if q.len() < 2 {
-        return SharedString::new();
-    }
-    let step = 100.0 / (HISTORY - 1) as f32;
-    let x0 = 100.0 - step * (q.len() - 1) as f32;
-    let mut s = String::with_capacity(q.len() * 14);
-    for (i, v) in q.iter().enumerate() {
-        let _ = std::fmt::Write::write_fmt(&mut s, format_args!("{}{:.1} {:.1} ", if i == 0 { 'M' } else { 'L' }, x0 + step * i as f32, 100.0 - v * 100.0));
-    }
-    s.into()
+fn history(q: &VecDeque<f32>) -> ModelRc<f32> {
+    ModelRc::new(VecModel::from(q.iter().copied().collect::<Vec<_>>()))
 }
 
 /// 270° ring arc (gap at the bottom) filled to `frac`, in a 100x100 viewbox.
@@ -92,8 +82,8 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_charge_limit(s.charge_limit.unwrap_or(100) as i32);
     ui.set_has_kbd(s.caps.kbd_backlight);
     ui.set_kbd_level(s.kbd_backlight.map(i32::from).unwrap_or(-1));
-    ui.set_temp_history(spark(temps));
-    ui.set_cpu_history(spark(loads));
+    ui.set_temp_history(history(temps));
+    ui.set_cpu_history(history(loads));
 }
 
 fn poll(weak: Weak<AppWindow>) {
