@@ -298,8 +298,20 @@ impl MsiEc {
             return Err(EcError::InvalidValue(format!("fan curve table holds {current:?}; not writing")));
         }
         let base = if gpu { m.gpu_speed_base } else { m.cpu_speed_base };
+        // All-or-nothing: if any byte fails, put every byte touched so far back, so the
+        // firmware never runs a half-written (possibly falling) curve.
         for (i, &v) in speeds.iter().enumerate() {
-            self.write(base + i as u8, v)?;
+            if let Err(e) = self.write(base + i as u8, v) {
+                let failed: Vec<u8> = (0..=i)
+                    .filter(|&j| self.io.write(base + j as u8, current[j]).is_err())
+                    .map(|j| base + j as u8)
+                    .collect();
+                return Err(if failed.is_empty() {
+                    EcError::Io(format!("{e}; fan curve rolled back"))
+                } else {
+                    EcError::Io(format!("{e}; rollback failed at {failed:02x?}"))
+                });
+            }
         }
         Ok(())
     }
@@ -372,6 +384,28 @@ mod tests {
         let mut e = MsiEc::new(Box::new(io), conf, Journal::in_memory(), false);
         assert!(e.set_shift_mode("turbo").is_err());
         assert!(e.journal.is_empty());
+    }
+
+    struct StuckAt(MockEc, u8);
+    impl EcIo for StuckAt {
+        fn read(&mut self, a: u8) -> Result<u8> {
+            self.0.read(a)
+        }
+        fn write(&mut self, a: u8, v: u8) -> Result<()> {
+            if a == self.1 { Ok(()) } else { self.0.write(a, v) }
+        }
+    }
+
+    #[test]
+    fn failed_fan_curve_write_rolls_back_whole_table() {
+        let mut io = MockEc::with_firmware("15MMIMS1.103");
+        io.regs[0xd4] = 0x8d;
+        let orig = [0, 30, 45, 60, 75, 90];
+        io.regs[0x72..0x78].copy_from_slice(&orig);
+        let conf = ModelDb::embedded().find("15MMIMS1.103").unwrap().conf.clone();
+        let mut e = MsiEc::new(Box::new(StuckAt(io, 0x74)), conf, Journal::in_memory(), false);
+        assert!(e.set_fan_curve_speeds(false, &[0, 50, 60, 70, 80, 100]).is_err());
+        assert_eq!(e.fan_curve(false).unwrap().1, orig.to_vec());
     }
 
     struct StuckEc(MockEc);

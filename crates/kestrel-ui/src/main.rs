@@ -5,6 +5,7 @@ use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
 use slint::{Model, ModelRc, SharedString, VecModel, Weak};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 slint::include_modules!();
@@ -141,13 +142,20 @@ fn ints(v: &[u8]) -> ModelRc<i32> {
     ModelRc::new(VecModel::from(v.iter().map(|&x| i32::from(x)).collect::<Vec<_>>()))
 }
 
+static CURVE_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// Only the newest load for the selected fan may fill the editor; Apply stays disabled
+/// (`curve-ready`) until it does, so one fan's speeds can never be written to the other.
 fn load_curve(weak: Weak<AppWindow>, gpu: bool) {
+    let generation = CURVE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
         let r = kestrel_core::transport::client().and_then(|mut c| c.call(&Request::GetFanCurve { gpu }));
         let _ = weak.upgrade_in_event_loop(move |ui| match r {
+            _ if CURVE_GEN.load(Ordering::SeqCst) != generation || ui.get_curve_gpu() != gpu => {}
             Ok(Response::FanCurve { temps, speeds }) => {
                 ui.set_curve_temps(ints(&temps));
                 ui.set_curve_speeds(ints(&speeds));
+                ui.set_curve_ready(true);
             }
             Ok(Response::Error(e)) => ui.set_message(e.into()),
             Ok(_) => {}
