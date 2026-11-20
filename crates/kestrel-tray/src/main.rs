@@ -120,7 +120,7 @@ mod win {
                     }
                 }
             }
-            apply_schedule(&mut sched);
+            apply_schedule(&mut sched, &mut app);
             apply_app_rules(&mut app);
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
@@ -162,7 +162,7 @@ mod win {
 
     /// Switches when a schedule window starts. When it ends, the earlier scenario comes back,
     /// unless something else changed the scenario in the meantime.
-    fn apply_schedule(st: &mut AppState) {
+    fn apply_schedule(st: &mut AppState, app: &mut AppState) {
         let auto = Automation::load();
         if auto.schedule.is_empty() && st.active.is_none() {
             return;
@@ -174,16 +174,17 @@ mod win {
         let current = current().and_then(|(s, _)| s);
         match want {
             Some(s) => {
-                if send(Request::SetScenario(s)).is_err() {
-                    return;
-                }
                 if st.active.is_none() {
-                    st.before = current;
+                    st.before = if app.active.is_some() { app.before } else { current };
+                }
+                if !set_scenario(app, s) {
+                    return;
                 }
             }
             None => {
-                if let (Some(b), true) = (st.before, current == st.active) {
-                    if send(Request::SetScenario(b)).is_err() {
+                let ours = if app.active.is_some() { app.before == st.active } else { current == st.active };
+                if let (Some(b), true) = (st.before, ours) {
+                    if !set_scenario(app, b) {
                         return;
                     }
                 }
@@ -191,6 +192,15 @@ mod win {
             }
         }
         st.active = want;
+    }
+
+    /// While a program rule is in force, only the scenario it restores on exit changes.
+    fn set_scenario(app: &mut AppState, s: Scenario) -> bool {
+        if app.active.is_some() {
+            app.before = Some(s);
+            return true;
+        }
+        send(Request::SetScenario(s)).is_ok()
     }
 
     fn running_exes() -> Vec<String> {
