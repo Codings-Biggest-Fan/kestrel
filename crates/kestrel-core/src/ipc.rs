@@ -24,6 +24,9 @@ pub enum Request {
     /// Put every register Kestrel changed back to its original value.
     RestoreDefaults,
     ConfirmFirmware,
+    SetWebcam(bool),
+    /// `true` puts the Win key on the left of the bottom row (Fn on the right).
+    SetFnWinSwap(bool),
     GetLighting,
     /// Static colour on a USB RGB device; `brightness` 0–100, 0 turns it off.
     SetLighting { device: String, color: [u8; 3], brightness: u8 },
@@ -99,6 +102,10 @@ pub struct Capabilities {
     /// Points per fan curve (0 = no editable curve).
     #[serde(default)]
     pub curve_points: u8,
+    #[serde(default)]
+    pub webcam: bool,
+    #[serde(default)]
+    pub fn_win_swap: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -120,6 +127,10 @@ pub struct Status {
     pub ram_total_mb: u32,
     pub on_ac: Option<bool>,
     pub battery_pct: Option<u8>,
+    #[serde(default)]
+    pub webcam: Option<bool>,
+    #[serde(default)]
+    pub fn_win_swap: Option<bool>,
 }
 
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {

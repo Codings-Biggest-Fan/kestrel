@@ -140,6 +140,12 @@ export component AppWindow inherits Window {
     in property <string> firmware;
     in property <bool> read-only: true;
     in property <bool> firmware-changed;
+    in property <bool> has-webcam;
+    in property <bool> webcam;
+    in property <bool> has-fn-swap;
+    in property <bool> fn-swap;
+    callback set-webcam(bool);
+    callback set-fn-swap(bool);
     callback confirm-firmware();
     in property <bool> supported;
     property <bool> can-write: connected && supported && !read-only;
@@ -490,6 +496,15 @@ export component AppWindow inherits Window {
 
             if page == 6: Flickable { VerticalLayout {
                 spacing: 16px;
+                if has-webcam || has-fn-swap: Card { title: "KEYBOARD AND CAMERA";
+                    if has-webcam: HorizontalLayout { spacing: 8px; alignment: start;
+                        Text { text: "Webcam"; width: 140px; color: Theme.text; vertical-alignment: center; }
+                        Pill { width: 96px; label: "Off"; selected: !webcam; enabled: can-write; clicked => { set-webcam(false); } }
+                        Pill { width: 96px; label: "On"; selected: webcam; enabled: can-write; clicked => { set-webcam(true); } } }
+                    if has-fn-swap: HorizontalLayout { spacing: 8px; alignment: start;
+                        Text { text: "Bottom-left key"; width: 140px; color: Theme.text; vertical-alignment: center; }
+                        Pill { width: 96px; label: "Fn"; selected: !fn-swap; enabled: can-write; clicked => { set-fn-swap(false); } }
+                        Pill { width: 96px; label: "Win"; selected: fn-swap; enabled: can-write; clicked => { set-fn-swap(true); } } } }
                 Card { title: "THIS LAPTOP";
                     Text { text: model-name; color: Theme.text; font-size: 16px; font-weight: 600; }
                     Text { text: "EC firmware " + firmware; color: Theme.muted; }

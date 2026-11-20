@@ -87,6 +87,10 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_battery(opt(s.battery_pct, "%"));
     ui.set_power_source(match s.on_ac { Some(true) => "Plugged in", Some(false) => "On battery", None => "Unknown" }.into());
     ui.set_has_boost(s.caps.cooler_boost);
+    ui.set_has_webcam(s.caps.webcam);
+    ui.set_webcam(s.webcam.unwrap_or(false));
+    ui.set_has_fn_swap(s.caps.fn_win_swap);
+    ui.set_fn_swap(s.fn_win_swap.unwrap_or(false));
     if s.caps.fan_curve && !ui.get_has_curve() {
         ui.invoke_load_curve(ui.get_curve_gpu());
     }
@@ -463,6 +467,10 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let w = ui.as_weak();
     ui.on_set_boost(move |on| send(w.clone(), Request::SetCoolerBoost(on)));
+    let w = ui.as_weak();
+    ui.on_set_webcam(move |on| send(w.clone(), Request::SetWebcam(on)));
+    let w = ui.as_weak();
+    ui.on_set_fn_swap(move |on| send(w.clone(), Request::SetFnWinSwap(on)));
     let w = ui.as_weak();
     ui.on_set_charge(move |p| send(w.clone(), Request::SetChargeLimit(p.clamp(10, 100) as u8)));
     let w = ui.as_weak();
