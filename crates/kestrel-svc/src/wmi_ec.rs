@@ -17,8 +17,23 @@ use windows::Win32::System::Wmi::{
     WBEM_GENERIC_FLAG_TYPE, WBEM_INFINITE,
 };
 
+const WBEM_E_ACCESS_DENIED: u32 = 0x8004_1003;
+const E_ACCESSDENIED: u32 = 0x8007_0005;
+
+fn hr_err(code: u32, what: &str) -> EcError {
+    match code {
+        WBEM_E_ACCESS_DENIED | E_ACCESSDENIED => {
+            EcError::Io("MSI_ACPI access denied: run kestrel-svc as administrator (or install it as a service)".into())
+        }
+        _ => EcError::Io(format!("WMI {what}: 0x{code:08x}")),
+    }
+}
+
 fn err(e: windows::core::Error) -> EcError {
-    EcError::Io(format!("WMI: {e}"))
+    match e.code().0 as u32 {
+        WBEM_E_ACCESS_DENIED | E_ACCESSDENIED => hr_err(e.code().0 as u32, ""),
+        _ => EcError::Io(format!("WMI: {e}")),
+    }
 }
 
 fn w(s: &str) -> Vec<u16> {
@@ -78,6 +93,9 @@ impl WmiEc {
             let mut objs = [None];
             let mut n = 0u32;
             let hr = en.Next(WBEM_INFINITE, &mut objs, &mut n);
+            if (hr.0 as u32) & 0x8000_0000 != 0 {
+                return Err(hr_err(hr.0 as u32, "MSI_ACPI enumeration"));
+            }
             let inst = objs[0].take().ok_or_else(|| {
                 // 0x80041010 = class not registered (BIOS MOF missing); S_FALSE (0x1) = class with no instance.
                 EcError::Io(format!("MSI_ACPI: no instance in root\\wmi (Next returned 0x{:08x}, {n} objects)", hr.0 as u32))
