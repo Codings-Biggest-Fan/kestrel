@@ -286,6 +286,9 @@ impl MsiEc {
     /// Write fan-curve speeds only; temperature breakpoints stay as the firmware set them.
     /// Speeds must be 0-100 % and non-decreasing.
     pub fn set_fan_curve_speeds(&mut self, gpu: bool, speeds: &[u8]) -> Result<()> {
+        if self.read_only {
+            return Err(EcError::ReadOnly);
+        }
         let m = self.conf.fan_curve.ok_or(EcError::Unsupported("fan curve"))?;
         if speeds.len() != m.points as usize
             || speeds.iter().any(|&v| v > 100)
@@ -394,6 +397,17 @@ mod tests {
         fn write(&mut self, a: u8, v: u8) -> Result<()> {
             if a == self.1 { Ok(()) } else { self.0.write(a, v) }
         }
+    }
+
+    #[test]
+    fn read_only_fan_curve_request_touches_nothing() {
+        let conf = ModelDb::embedded().find("15MMIMS1.103").unwrap().conf.clone();
+        let mut io = MockEc::with_firmware("15MMIMS1.103");
+        io.regs[0x72] = 9;
+        let mut e = MsiEc::new(Box::new(io), conf, Journal::in_memory(), true);
+        assert!(matches!(e.set_fan_curve_speeds(false, &[0, 50, 60, 70, 80, 100]), Err(EcError::ReadOnly)));
+        assert_eq!(e.fan_curve(false).unwrap().1[0], 9);
+        assert!(e.journal.is_empty());
     }
 
     #[test]
