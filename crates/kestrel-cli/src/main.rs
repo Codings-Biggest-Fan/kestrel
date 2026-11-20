@@ -20,6 +20,9 @@ fn scenario(name: &str) -> Option<Scenario> {
 }
 
 fn run(args: &[String]) -> Result<String, String> {
+    if !matches!(args.first().map(String::as_str), Some("status" | "scenario" | "boost" | "profile")) {
+        return Err(USAGE.into());
+    }
     let mut c = kestrel_core::transport::client().map_err(|e| format!("service not running: {e}"))?;
     let send = |c: &mut kestrel_core::ipc::Client<_>, r: &Request| c.command(r).map_err(|e| e.to_string());
     match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
@@ -57,17 +60,28 @@ fn run(args: &[String]) -> Result<String, String> {
         ["profile", name @ ..] if !name.is_empty() => {
             let name = name.join(" ");
             let caps = c.status().map_err(|e| e.to_string())?.caps;
-            let all = profiles::load().into_iter().chain(profiles::presets(&caps.scenarios, caps.curve_points as usize, false));
-            let p = all
-                .into_iter()
-                .find(|p| key(&p.name) == key(&name))
-                .ok_or_else(|| format!("no profile named {name:?}"))?;
+            let all: Vec<_> =
+                profiles::load().into_iter().chain(profiles::presets(&caps.scenarios, caps.curve_points as usize, false)).collect();
+            let p = pick_profile(&all, &name)?.clone();
             for r in profiles::requests(&p) {
                 send(&mut c, &r)?;
             }
             Ok(format!("profile: {}", p.name))
         }
         _ => Err(USAGE.into()),
+    }
+}
+
+/// An exact (case-insensitive) name wins; otherwise a punctuation-insensitive match must be unique.
+fn pick_profile<'a>(all: &'a [profiles::Profile], name: &str) -> Result<&'a profiles::Profile, String> {
+    if let Some(p) = all.iter().find(|p| p.name.eq_ignore_ascii_case(name)) {
+        return Ok(p);
+    }
+    let loose: Vec<_> = all.iter().filter(|p| key(&p.name) == key(name)).collect();
+    match loose.as_slice() {
+        [p] => Ok(p),
+        [] => Err(format!("no profile named {name:?}")),
+        _ => Err(format!("{name:?} matches several profiles; use the exact name")),
     }
 }
 
