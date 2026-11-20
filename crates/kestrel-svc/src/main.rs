@@ -69,6 +69,12 @@ fn open_backend(mock_fw: Option<String>) -> Result<(Box<dyn EcIo>, String), Stri
         io.regs[0x80] = 47;
         io.regs[0xc9] = 0xc8;
         io.regs[0xcb] = 0xd2;
+        for (i, (t, sp)) in [(50, 0), (58, 30), (65, 45), (72, 60), (80, 75), (88, 90)].into_iter().enumerate() {
+            io.regs[0x69 + i] = t;
+            io.regs[0x72 + i] = sp;
+            io.regs[0x81 + i] = t - 5;
+            io.regs[0x8a + i] = sp;
+        }
         let id = read_firmware_id(&mut io).map_err(|e| e.to_string())?;
         return Ok((Box::new(io), id));
     }

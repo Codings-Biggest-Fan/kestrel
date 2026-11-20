@@ -1,9 +1,9 @@
 //! kestrel-ui: main window. Talks to kestrel-svc over IPC and exits when closed.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use kestrel_core::ipc::{Request, Status};
+use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
-use slint::{ModelRc, SharedString, VecModel, Weak};
+use slint::{Model, ModelRc, SharedString, VecModel, Weak};
 use std::collections::VecDeque;
 use std::time::Duration;
 
@@ -77,6 +77,10 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_battery(opt(s.battery_pct, "%"));
     ui.set_power_source(match s.on_ac { Some(true) => "Plugged in", Some(false) => "On battery", None => "Unknown" }.into());
     ui.set_has_boost(s.caps.cooler_boost);
+    if s.caps.fan_curve && !ui.get_has_curve() {
+        ui.invoke_load_curve(ui.get_curve_gpu());
+    }
+    ui.set_has_curve(s.caps.fan_curve);
     ui.set_cooler_boost(s.cooler_boost.unwrap_or(false));
     ui.set_has_charge(s.caps.charge_limit);
     ui.set_charge_limit(s.charge_limit.unwrap_or(100) as i32);
@@ -133,6 +137,36 @@ fn send(weak: Weak<AppWindow>, req: Request) {
     });
 }
 
+fn ints(v: &[u8]) -> ModelRc<i32> {
+    ModelRc::new(VecModel::from(v.iter().map(|&x| i32::from(x)).collect::<Vec<_>>()))
+}
+
+fn load_curve(weak: Weak<AppWindow>, gpu: bool) {
+    std::thread::spawn(move || {
+        let r = kestrel_core::transport::client().and_then(|mut c| c.call(&Request::GetFanCurve { gpu }));
+        let _ = weak.upgrade_in_event_loop(move |ui| match r {
+            Ok(Response::FanCurve { temps, speeds }) => {
+                ui.set_curve_temps(ints(&temps));
+                ui.set_curve_speeds(ints(&speeds));
+            }
+            Ok(Response::Error(e)) => ui.set_message(e.into()),
+            Ok(_) => {}
+            Err(e) => ui.set_message(e.to_string().into()),
+        });
+    });
+}
+
+/// Clamp to 0-100 and make the curve non-decreasing, as the service requires.
+fn monotonic(speeds: impl Iterator<Item = i32>) -> Vec<u8> {
+    let mut floor = 0u8;
+    speeds
+        .map(|v| {
+            floor = floor.max(v.clamp(0, 100) as u8);
+            floor
+        })
+        .collect()
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
     let items: Vec<ScenarioItem> =
@@ -154,6 +188,22 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_kbd(move |l| send(w.clone(), Request::SetKbdBacklight(l.clamp(0, 3) as u8)));
     let w = ui.as_weak();
     ui.on_restore(move || send(w.clone(), Request::RestoreDefaults));
+    let w = ui.as_weak();
+    ui.on_load_curve(move |gpu| load_curve(w.clone(), gpu));
+    let w = ui.as_weak();
+    ui.on_apply_curve(move |gpu, m| {
+        let speeds = monotonic(m.iter());
+        let w = w.clone();
+        if let Some(ui) = w.upgrade() {
+            ui.set_curve_speeds(ints(&speeds));
+        }
+        std::thread::spawn(move || {
+            let r = kestrel_core::transport::client().and_then(|mut c| c.command(&Request::SetFanCurve { gpu, speeds }));
+            let msg: SharedString = r.err().map(|e| e.to_string()).unwrap_or_default().into();
+            let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
+            load_curve(w, gpu);
+        });
+    });
 
     let w = ui.as_weak();
     std::thread::Builder::new().name("poll".into()).stack_size(256 * 1024).spawn(move || poll(w)).ok();
