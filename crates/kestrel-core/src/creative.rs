@@ -262,6 +262,14 @@ impl SoundBlaster {
 
     /// Send `req` and apply every report until one satisfies `done`.
     fn ask(&mut self, req: &[u8; PACKET], done: impl Fn(&Report) -> bool) -> Result<Report> {
+        // Drop leftovers (unsolicited notifications, late replies) so the answer we
+        // match below belongs to this request.
+        for _ in 0..32 {
+            let Some(p) = self.io.read(0)? else { break };
+            if let Some(r) = parse(&p) {
+                self.apply(&r);
+            }
+        }
         self.io.write(req)?;
         for _ in 0..16 {
             let Some(p) = self.io.read(ANSWER_MS)? else {
@@ -352,6 +360,8 @@ pub struct MockG6 {
     pub writes: Vec<[u8; PACKET]>,
     /// Ignore writes to this DSP id (to test unconfirmed writes).
     pub stuck: Option<u8>,
+    /// Push a report after every DSP write, as the real G6 does.
+    pub notify_writes: bool,
 }
 
 impl MockG6 {
@@ -402,6 +412,12 @@ impl HidIo for MockG6 {
                 if self.stuck != Some(*id) {
                     self.dsp
                         .insert(*id, f32::from_le_bytes([*a, *b, p[8], p[9]]));
+                }
+                if self.notify_writes {
+                    self.pending.push_back(Self::dsp_report(
+                        *id,
+                        self.dsp.get(id).copied().unwrap_or(0.0),
+                    ));
                 }
             }
             (FAM_OUTPUT, [0x05, 0x00, o, ..]) => {
@@ -526,6 +542,20 @@ mod tests {
         let mut sb = SoundBlaster::new(Box::new(mock), "G6").unwrap();
         assert!(sb.set(AudioSetting::EffectLevel(Effect::Bass, 90)).is_err());
         assert_eq!(sb.state().effects[2].unwrap().level, 30);
+    }
+
+    #[test]
+    fn write_notifications_do_not_shift_later_answers() {
+        let mock = MockG6 {
+            notify_writes: true,
+            ..MockG6::new()
+        };
+        let mut sb = SoundBlaster::new(Box::new(mock), "G6").unwrap();
+        for pct in [40, 60, 80, 20] {
+            sb.set(AudioSetting::EffectLevel(Effect::Bass, pct))
+                .unwrap();
+            assert_eq!(sb.state().effects[2].unwrap().level, pct);
+        }
     }
 
     struct Silent;
