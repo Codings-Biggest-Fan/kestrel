@@ -111,14 +111,14 @@ mod win {
         // `None` first, so the settings for the current power source apply when the tray starts.
         let mut last: Option<bool> = None;
         let mut app = AppState::default();
-        let mut low_active = false;
+        let mut low: Option<Scenario> = None;
         loop {
             let now = on_ac();
             if let Some(ac) = now {
                 if last != Some(ac) {
                     let a = Automation::load().on_power_change(ac);
                     // Retried next poll if the service is not up yet (it starts alongside the tray).
-                    let sent = a.scenario.is_none_or(|s| send(Request::SetScenario(s)).is_ok());
+                    let sent = a.scenario.is_none_or(|s| set_scenario(&mut app, s));
                     if let Some(r) = a.refresh {
                         let _ = display::set(r);
                     }
@@ -130,12 +130,16 @@ mod win {
             if let Some(ac) = now {
                 let auto = Automation::load();
                 match auto.low_battery_scenario(ac, battery_pct()) {
-                    Some(s) if !low_active => low_active = send(Request::SetScenario(s)).is_ok(),
-                    None if low_active => {
-                        low_active = false;
+                    Some(s) if low != Some(s) => {
+                        if set_scenario(&mut app, s) {
+                            low = Some(s);
+                        }
+                    }
+                    None if low.is_some() => {
+                        low = None;
                         // Still on battery (e.g. the threshold was lowered): back to the battery scenario.
                         if let (false, Some(s)) = (ac, auto.battery_scenario) {
-                            let _ = send(Request::SetScenario(s));
+                            set_scenario(&mut app, s);
                         }
                     }
                     _ => {}
@@ -144,6 +148,16 @@ mod win {
             apply_app_rules(&mut app);
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
+    }
+
+    /// Power automation scenario change. While a program rule is in force it only replaces the
+    /// scenario that rule restores when the program closes.
+    fn set_scenario(app: &mut AppState, s: Scenario) -> bool {
+        if app.active.is_some() {
+            app.before = Some(s);
+            return true;
+        }
+        send(Request::SetScenario(s)).is_ok()
     }
 
     /// Auto engine state: the rule scenario in force and the scenario to return to afterwards.
