@@ -50,4 +50,16 @@ impl Scenario {
     pub fn super_battery(self) -> bool {
         self == Scenario::SuperBattery
     }
+
+    /// Scenarios this model's EC can actually do. Super Battery needs its own register: on
+    /// boards without one (e.g. Vector A16 HX) MSI Center does not offer it either.
+    pub fn available(conf: &crate::model::ModelConf) -> Vec<Scenario> {
+        let Some(shift) = conf.shift_mode.as_ref() else { return Vec::new() };
+        let has_sb = conf.super_battery.and_then(|f| f.address).is_some();
+        Self::ALL
+            .into_iter()
+            .filter(|s| s.shift_modes().iter().any(|m| shift.modes.contains_key(*m)))
+            .filter(|s| !s.super_battery() || has_sb)
+            .collect()
+    }
 }

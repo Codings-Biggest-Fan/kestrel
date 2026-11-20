@@ -62,7 +62,10 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_firmware(s.model.firmware.clone().into());
     ui.set_read_only(s.model.read_only);
     ui.set_supported(s.model.map_id.is_some());
-    ui.set_scenario(s.scenario.map(|x| x.index() as i32).unwrap_or(-1));
+    if !s.caps.scenarios.is_empty() && *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) != s.caps.scenarios {
+        show_scenarios(ui, s.caps.scenarios.clone());
+    }
+    ui.set_scenario(shown_index(s.scenario));
     ui.set_cpu_temp(opt(s.cpu_temp, ""));
     ui.set_gpu_temp(opt(s.gpu_temp, ""));
     ui.set_cpu_temp_f(s.cpu_temp.unwrap_or(0) as f32 / 100.0);
@@ -137,10 +140,6 @@ fn send(weak: Weak<AppWindow>, req: Request) {
         let msg: SharedString = r.err().map(|e| e.to_string()).unwrap_or_default().into();
         let _ = weak.upgrade_in_event_loop(move |ui| ui.set_message(msg));
     });
-}
-
-fn ints(v: &[u8]) -> ModelRc<i32> {
-    ModelRc::new(VecModel::from(v.iter().map(|&x| i32::from(x)).collect::<Vec<_>>()))
 }
 
 const SWATCHES: [[u8; 3]; 8] = [
@@ -253,8 +252,7 @@ fn load_curve(weak: Weak<AppWindow>, gpu: bool) {
         let _ = weak.upgrade_in_event_loop(move |ui| match r {
             _ if CURVE_GEN.load(Ordering::SeqCst) != generation || ui.get_curve_gpu() != gpu => {}
             Ok(Response::FanCurve { temps, speeds }) => {
-                ui.set_curve_temps(ints(&temps));
-                ui.set_curve_speeds(ints(&speeds));
+                show_curve(&ui, &temps, &speeds);
                 ui.set_curve_ready(true);
             }
             Ok(Response::Error(e)) => ui.set_message(e.into()),
@@ -263,6 +261,60 @@ fn load_curve(weak: Weak<AppWindow>, gpu: bool) {
         });
     });
 }
+
+/// x of each point as a fraction of the graph width: temperature on a 20–100 °C axis,
+/// or evenly spaced if the firmware's temperatures are missing.
+fn curve_xs(temps: &[i32], n: usize) -> Vec<f32> {
+    if temps.len() == n && n > 0 {
+        temps.iter().map(|&t| ((t as f32 - 20.0) / 80.0).clamp(0.03, 0.97)).collect()
+    } else {
+        (0..n).map(|i| (i as f32 + 0.5) / n.max(1) as f32).collect()
+    }
+}
+
+/// Graph size in pixels; Slint keeps a path's aspect ratio, so paths are drawn in pixels.
+static GRAPH: std::sync::Mutex<(f32, f32)> = std::sync::Mutex::new((100.0, 100.0));
+
+/// SVG paths in a w×h viewbox: the curve held flat to both edges, and the area under it.
+fn curve_paths(xs: &[f32], speeds: &[i32]) -> (String, String) {
+    if xs.is_empty() || xs.len() != speeds.len() {
+        return (String::new(), String::new());
+    }
+    let (w, h) = *GRAPH.lock().unwrap_or_else(|p| p.into_inner());
+    let pt = |x: f32, v: i32| format!("{:.2} {:.2}", x * w, h * (1.0 - v.clamp(0, 100) as f32 / 100.0));
+    let mut line = format!("M {}", pt(0.0, speeds[0]));
+    for (x, v) in xs.iter().zip(speeds) {
+        line += &format!(" L {}", pt(*x, *v));
+    }
+    line += &format!(" L {}", pt(1.0, speeds[speeds.len() - 1]));
+    let fill = format!("{line} L {w:.2} {h:.2} L 0 {h:.2} Z");
+    (line, fill)
+}
+
+fn show_curve(ui: &AppWindow, temps: &[u8], speeds: &[u8]) {
+    let temps: Vec<i32> = temps.iter().map(|&t| i32::from(t)).collect();
+    let speeds: Vec<i32> = speeds.iter().map(|&v| i32::from(v)).collect();
+    let xs = curve_xs(&temps, speeds.len());
+    let (line, fill) = curve_paths(&xs, &speeds);
+    ui.set_curve_temps(ModelRc::new(VecModel::from(temps)));
+    ui.set_curve_speeds(ModelRc::new(VecModel::from(speeds)));
+    ui.set_curve_xs(ModelRc::new(VecModel::from(xs)));
+    ui.set_curve_line(line.into());
+    ui.set_curve_fill(fill.into());
+}
+
+/// Moves point `i` to `v` and pushes its neighbours so the curve stays non-decreasing.
+fn drag_point(speeds: &mut [i32], i: usize, v: i32) {
+    speeds[i] = v;
+    for s in &mut speeds[i + 1..] {
+        *s = (*s).max(v);
+    }
+    for s in &mut speeds[..i] {
+        *s = (*s).min(v);
+    }
+}
+
+static DRAG_I: AtomicU64 = AtomicU64::new(0);
 
 /// Clamp to 0-100 and make the curve non-decreasing, as the service requires.
 fn monotonic(speeds: impl Iterator<Item = i32>) -> Vec<u8> {
@@ -275,16 +327,36 @@ fn monotonic(speeds: impl Iterator<Item = i32>) -> Vec<u8> {
         .collect()
 }
 
+/// Scenarios the UI lists; UI indices refer to this, not to `Scenario::ALL`.
+static SHOWN: std::sync::Mutex<Vec<Scenario>> = std::sync::Mutex::new(Vec::new());
+
+fn shown_index(s: Option<Scenario>) -> i32 {
+    let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner());
+    s.and_then(|s| shown.iter().position(|&x| x == s)).map_or(-1, |i| i as i32)
+}
+
+fn shown_at(i: i32) -> Option<Scenario> {
+    let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner());
+    usize::try_from(i).ok().and_then(|i| shown.get(i).copied())
+}
+
+fn show_scenarios(ui: &AppWindow, list: Vec<Scenario>) {
+    let items: Vec<ScenarioItem> = list.iter().map(|&s| ScenarioItem { label: s.label().into(), hint: hint(s).into() }).collect();
+    *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) = list;
+    ui.set_scenarios(ModelRc::new(VecModel::from(items)));
+    let auto = Automation::load();
+    ui.set_auto_bat(shown_index(auto.battery_scenario));
+    ui.set_auto_ac(shown_index(auto.ac_scenario));
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
-    let items: Vec<ScenarioItem> =
-        Scenario::ALL.iter().map(|&s| ScenarioItem { label: s.label().into(), hint: hint(s).into() }).collect();
-    ui.set_scenarios(ModelRc::new(VecModel::from(items)));
+    show_scenarios(&ui, Scenario::ALL.to_vec());
     ui.set_track(arc(1.0));
 
     let w = ui.as_weak();
     ui.on_set_scenario(move |i| {
-        if let Some(s) = Scenario::from_index(i as usize) {
+        if let Some(s) = shown_at(i) {
             send(w.clone(), Request::SetScenario(s));
         }
     });
@@ -306,14 +378,10 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     load_lights(ui.as_weak());
     let auto = Automation::load();
-    let idx = |s: Option<Scenario>| s.map_or(-1, |s| s.index() as i32);
-    ui.set_auto_bat(idx(auto.battery_scenario));
-    ui.set_auto_ac(idx(auto.ac_scenario));
     ui.set_auto_60hz(auto.battery_60hz);
     let w = ui.as_weak();
     ui.on_set_auto(move |bat, ac, hz60| {
-        let pick = |i: i32| usize::try_from(i).ok().and_then(Scenario::from_index);
-        let a = Automation { battery_scenario: pick(bat), ac_scenario: pick(ac), battery_60hz: hz60, ..Automation::load() };
+        let a = Automation { battery_scenario: shown_at(bat), ac_scenario: shown_at(ac), battery_60hz: hz60, ..Automation::load() };
         let msg: SharedString = a.save().err().map(|e| format!("Could not save automation: {e}")).unwrap_or_default().into();
         if let Some(ui) = w.upgrade() {
             ui.set_message(msg);
@@ -337,7 +405,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let Some(ui) = w.upgrade() else { return };
         let exe = exe.trim().to_ascii_lowercase();
         let exe = if exe.ends_with(".exe") { exe } else { format!("{exe}.exe") };
-        let Some(scenario) = usize::try_from(scenario).ok().and_then(Scenario::from_index) else { return };
+        let Some(scenario) = shown_at(scenario) else { return };
         if exe == ".exe" {
             return;
         }
@@ -380,11 +448,42 @@ fn main() -> Result<(), slint::PlatformError> {
     let w = ui.as_weak();
     ui.on_load_curve(move |gpu| load_curve(w.clone(), gpu));
     let w = ui.as_weak();
+    ui.on_curve_resize(move |gw, gh| {
+        let Some(ui) = w.upgrade() else { return };
+        *GRAPH.lock().unwrap_or_else(|p| p.into_inner()) = (gw.max(1.0), gh.max(1.0));
+        let xs: Vec<f32> = ui.get_curve_xs().iter().collect();
+        let speeds: Vec<i32> = ui.get_curve_speeds().iter().collect();
+        let (line, fill) = curve_paths(&xs, &speeds);
+        ui.set_curve_line(line.into());
+        ui.set_curve_fill(fill.into());
+    });
+    let w = ui.as_weak();
+    ui.on_curve_drag(move |down, fx, fy| {
+        let Some(ui) = w.upgrade() else { return };
+        let xs: Vec<f32> = ui.get_curve_xs().iter().collect();
+        let mut speeds: Vec<i32> = ui.get_curve_speeds().iter().collect();
+        if speeds.is_empty() || xs.len() != speeds.len() {
+            return;
+        }
+        if down {
+            let near = xs.iter().enumerate().min_by(|a, b| (a.1 - fx).abs().total_cmp(&(b.1 - fx).abs())).map_or(0, |(i, _)| i);
+            DRAG_I.store(near as u64, Ordering::Relaxed);
+        }
+        let i = (DRAG_I.load(Ordering::Relaxed) as usize).min(speeds.len() - 1);
+        let v = (((1.0 - fy) * 20.0).round() as i32 * 5).clamp(0, 100);
+        drag_point(&mut speeds, i, v);
+        let (line, fill) = curve_paths(&xs, &speeds);
+        ui.set_curve_speeds(ModelRc::new(VecModel::from(speeds)));
+        ui.set_curve_line(line.into());
+        ui.set_curve_fill(fill.into());
+    });
+    let w = ui.as_weak();
     ui.on_apply_curve(move |gpu, m| {
         let speeds = monotonic(m.iter());
         let w = w.clone();
         if let Some(ui) = w.upgrade() {
-            ui.set_curve_speeds(ints(&speeds));
+            let temps: Vec<u8> = ui.get_curve_temps().iter().map(|t| t.clamp(0, 255) as u8).collect();
+            show_curve(&ui, &temps, &speeds);
         }
         std::thread::spawn(move || {
             let r = kestrel_core::transport::client().and_then(|mut c| c.command(&Request::SetFanCurve { gpu, speeds }));
@@ -428,5 +527,28 @@ mod win {
         ] {
             unsafe { DwmSetWindowAttribute(hwnd, attr, &val as *const u32 as _, 4) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dragging_keeps_curve_rising() {
+        let mut s = vec![20, 30, 40, 50, 60, 70];
+        drag_point(&mut s, 2, 80);
+        assert_eq!(s, vec![20, 30, 80, 80, 80, 80]);
+        drag_point(&mut s, 4, 10);
+        assert_eq!(s, vec![10, 10, 10, 10, 10, 80]);
+    }
+
+    #[test]
+    fn paths_span_the_graph() {
+        let xs = curve_xs(&[40, 60], 2);
+        assert_eq!(xs, vec![0.25, 0.5]);
+        let (line, fill) = curve_paths(&xs, &[30, 90]);
+        assert_eq!(line, "M 0.00 70.00 L 25.00 70.00 L 50.00 10.00 L 100.00 10.00");
+        assert!(fill.ends_with("L 100.00 100.00 L 0 100.00 Z"));
     }
 }

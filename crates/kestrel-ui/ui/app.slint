@@ -209,6 +209,11 @@ export component AppWindow inherits Window {
     in-out property <bool> curve-ready;
     in property <[int]> curve-temps;
     in-out property <[int]> curve-speeds;
+    in property <[float]> curve-xs;
+    in property <string> curve-line;
+    in property <string> curve-fill;
+    callback curve-drag(bool, float, float);
+    callback curve-resize(float, float);
     callback load-curve(bool);
     callback apply-curve(bool, [int]);
 
@@ -315,7 +320,7 @@ export component AppWindow inherits Window {
                 Rectangle {}
             }
 
-            if page == 2: VerticalLayout {
+            if page == 2: Flickable { interactive: false; VerticalLayout {
                 spacing: 16px;
                 HorizontalLayout { spacing: 16px;
                     Gauge { title: "CPU FAN"; arc: cpu-arc; track: track; fill: cpu-temp-f; value: cpu-temp; unit: cpu-fan; sub: "CPU °C"; }
@@ -331,24 +336,44 @@ export component AppWindow inherits Window {
                     if has-curve: HorizontalLayout { spacing: 8px; alignment: start;
                         Pill { width: 96px; label: "CPU"; selected: !curve-gpu; clicked => { curve-gpu = false; curve-ready = false; load-curve(false); } }
                         Pill { width: 96px; label: "GPU"; selected: curve-gpu; clicked => { curve-gpu = true; curve-ready = false; load-curve(true); } } }
-                    if has-curve: HorizontalLayout { spacing: 10px; min-height: 170px; vertical-stretch: 1;
-                        for v[i] in curve-speeds: VerticalLayout { spacing: 6px;
-                            Rectangle { background: #1b1e26; border-radius: 8px; border-width: 1px; border-color: Theme.line;
-                                Rectangle { y: parent.height - self.height; height: parent.height * v / 100; border-radius: 8px;
-                                    background: @linear-gradient(0deg, Theme.accent-fill, Theme.accent);
-                                    animate height { duration: 120ms; easing: ease-out; } }
-                                Text { y: 6px; text: v + "%"; color: Theme.text; font-size: 12px; font-weight: 600; horizontal-alignment: center; }
-                                TouchArea { enabled: can-write && curve-ready; mouse-cursor: can-write && curve-ready ? MouseCursor.ns-resize : MouseCursor.default;
-                                    pointer-event(e) => { if e.kind == PointerEventKind.down { curve-speeds[i] = max(0, min(100, round((1 - self.mouse-y / self.height) * 20) * 5)); } }
-                                    moved => { if self.pressed { curve-speeds[i] = max(0, min(100, round((1 - self.mouse-y / self.height) * 20) * 5)); } } } }
-                            Text { text: i < curve-temps.length ? curve-temps[i] + " °C" : ""; color: Theme.muted; font-size: 11px; horizontal-alignment: center; } } }
+                    if has-curve: HorizontalLayout { spacing: 8px; min-height: 230px; vertical-stretch: 1;
+                        VerticalLayout { width: 34px; padding-bottom: 22px;
+                            Text { text: "100%"; color: Theme.muted; font-size: 10px; horizontal-alignment: right; }
+                            Rectangle {}
+                            Text { text: "50%"; color: Theme.muted; font-size: 10px; horizontal-alignment: right; }
+                            Rectangle {}
+                            Text { text: "0%"; color: Theme.muted; font-size: 10px; horizontal-alignment: right; } }
+                        VerticalLayout { spacing: 6px;
+                            graph := Rectangle { background: #13151b; border-radius: 10px; border-width: 1px; border-color: Theme.line; clip: true;
+                                init => { curve-resize(self.width / 1px, self.height / 1px); }
+                                changed width => { curve-resize(self.width / 1px, self.height / 1px); }
+                                changed height => { curve-resize(self.width / 1px, self.height / 1px); }
+                                for f in [0.25, 0.5, 0.75]: Rectangle { y: parent.height * f; height: 1px; background: #232731; }
+                                for x in curve-xs: Rectangle { x: parent.width * x; width: 1px; background: #1c1f27; }
+                                Path { width: 100%; height: 100%; viewbox-width: graph.width / 1px; viewbox-height: graph.height / 1px; commands: curve-fill;
+                                    fill: @linear-gradient(180deg, #e5393566, #e5393505); stroke-width: 0px; }
+                                Path { width: 100%; height: 100%; viewbox-width: graph.width / 1px; viewbox-height: graph.height / 1px; commands: curve-line;
+                                    fill: transparent; stroke: Theme.accent; stroke-width: 2.5px; }
+                                for v[i] in curve-speeds: Rectangle {
+                                    x: parent.width * (i < curve-xs.length ? curve-xs[i] : 0) - 8px; y: parent.height * (1 - v / 100) - 8px;
+                                    width: 16px; height: 16px; border-radius: 8px; background: Theme.accent; border-width: 3px; border-color: #13151b;
+                                    animate y { duration: 90ms; easing: ease-out; } }
+                                for v[i] in curve-speeds: Text {
+                                    x: max(2px, min(parent.width - 36px, parent.width * (i < curve-xs.length ? curve-xs[i] : 0) - 16px));
+                                    y: v > 85 ? parent.height * (1 - v / 100) + 12px : parent.height * (1 - v / 100) - 26px;
+                                    width: 32px; text: v + "%"; color: Theme.text; font-size: 11px; font-weight: 600; horizontal-alignment: center; }
+                                TouchArea { enabled: can-write && curve-ready; mouse-cursor: can-write && curve-ready ? MouseCursor.pointer : MouseCursor.default;
+                                    pointer-event(e) => { if e.kind == PointerEventKind.down { curve-drag(true, self.mouse-x / self.width, self.mouse-y / self.height); } }
+                                    moved => { if self.pressed { curve-drag(false, self.mouse-x / self.width, self.mouse-y / self.height); } } } }
+                            Rectangle { height: 16px;
+                                for t[i] in curve-temps: Text { x: max(0px, min(parent.width - 40px, graph.width * (i < curve-xs.length ? curve-xs[i] : 0) - 20px)); width: 40px;
+                                    text: t + " °C"; color: Theme.muted; font-size: 11px; horizontal-alignment: center; } } } }
                     if has-curve: HorizontalLayout { spacing: 8px; alignment: start;
                         Pill { width: 128px; label: "Apply curve"; selected: true; enabled: can-write && curve-ready; clicked => { curve-ready = false; apply-curve(curve-gpu, curve-speeds); } }
                         Pill { width: 96px; label: "Reload"; clicked => { curve-ready = false; load-curve(curve-gpu); } } }
                     if has-curve: Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
-                        text: "Drag a bar to set fan speed. Speeds are kept rising left to right; temperature points stay as the firmware set them. Choosing a scenario returns fan control to the firmware. Laptops that only follow custom curves in Extreme (such as the Vector A16 HX) switch to Extreme when you apply."; } }
-                Rectangle {}
-            }
+                        text: "Drag a point up or down to set fan speed. Speeds are kept rising left to right; temperature points stay as the firmware set them. Choosing a scenario returns fan control to the firmware. Laptops that only follow custom curves in Extreme (such as the Vector A16 HX) switch to Extreme when you apply."; } }
+            } }
 
             if page == 3: VerticalLayout {
                 spacing: 16px;

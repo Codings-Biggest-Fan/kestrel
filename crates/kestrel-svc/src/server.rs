@@ -160,6 +160,9 @@ fn with_ec(st: &mut State, f: impl FnOnce(&mut MsiEc) -> kestrel_core::ec::Resul
 
 fn apply_scenario(st: &mut State, s: Scenario) -> Result<(), String> {
     with_ec(st, |ec| {
+        if !Scenario::available(ec.conf()).contains(&s) {
+            return Err(kestrel_core::ec::EcError::Unsupported(s.label()));
+        }
         let shift = ec.conf().shift_mode.clone();
         let fan = ec.conf().fan_mode.clone();
         if let Some(name) = shift.and_then(|m| s.shift_modes().iter().find(|n| m.modes.contains_key(**n)).copied()) {
@@ -196,6 +199,7 @@ fn status(st: &mut State) -> Status {
             super_battery: c.super_battery.and_then(|f| f.address).is_some(),
             shift_modes: c.shift_mode.as_ref().map(|m| m.modes.keys().cloned().collect()).unwrap_or_default(),
             fan_curve: c.fan_curve.is_some(),
+            scenarios: Scenario::available(c),
         };
         s.cooler_boost = ec.cooler_boost().ok();
         s.charge_limit = ec.charge_limit().ok().flatten();
