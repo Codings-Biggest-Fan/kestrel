@@ -61,6 +61,19 @@ The service needs administrator rights to talk to MSI's firmware interface. With
 Double-click `kestrel-ui.exe` (the main window) and optionally `kestrel-tray.exe` (tray icon with quick
 scenario switching). Closing the main window exits it completely.
 
+## CPU power limits (experimental, optional)
+
+Scenarios → **CPU power limits** sets the CPU's sustained and boost wattage on AMD Ryzen
+(Raven Ridge through Strix Halo, Dragon Range and Fire Range) and on Intel CPUs whose BIOS
+doesn't lock the limits. It needs the free, signed **PawnIO** driver:
+
+1. Download `PawnIO_setup.exe` from [pawnio.eu](https://pawnio.eu) or its
+   [GitHub releases](https://github.com/namazso/PawnIO.Setup/releases) and run it.
+2. Restart Kestrel. The card shows your CPU and turns on.
+
+The laptop's own temperature limits still apply. On AMD, reboot to get the factory limits
+back; on Intel, **Reset** puts back the limits Kestrel found.
+
 ## 7. Undo everything
 
 - **Settings → Restore original EC values** writes back every register Kestrel changed.

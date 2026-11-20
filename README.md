@@ -48,5 +48,8 @@ Builds without a key refuse to install updates.
 
 ## License
 
+CPU power limits use the [PawnIO](https://github.com/namazso/PawnIO) driver; the `RyzenSMU` and `IntelMSR` modules in `crates/kestrel-svc/pawnio/` come from [PawnIO.Modules](https://github.com/namazso/PawnIO.Modules) 0.2.12 (LGPL-2.1). SMU message IDs and mailbox addresses follow [RyzenAdj](https://github.com/FlyGoat/RyzenAdj).
+
+
 GPL-3.0-or-later. Register maps derive from [msi-ec](https://github.com/BeardOverflow/msi-ec)
 (GPL-2.0-or-later) and GhostDeck owner reports (GPL-3.0).

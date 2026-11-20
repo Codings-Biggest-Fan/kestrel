@@ -6,6 +6,7 @@
 //!   kestrel-svc --mock <FW_ID>     foreground with an in-memory EC (development, CI)
 //!   kestrel-svc install|uninstall  register / remove the Windows service
 
+mod cpu_power;
 mod drivers;
 mod lighting;
 mod server;
@@ -48,6 +49,7 @@ fn main() {
 }
 
 pub fn run(mock_fw: Option<String>) -> Result<(), String> {
+    cpu_power::MOCK.store(mock_fw.is_some(), std::sync::atomic::Ordering::Relaxed);
     let state = Arc::new(Mutex::new(init(mock_fw)));
     {
         let st = state.lock().unwrap();

@@ -30,6 +30,10 @@ pub enum Request {
     GetDriverUpdates,
     /// Download and install the driver updates with these Windows Update IDs.
     InstallDriverUpdates(Vec<String>),
+    GetCpuPower,
+    /// Package power limits in watts; the service clamps them to `cpu_power::MIN_W..=MAX_W`.
+    SetCpuPower { sustained_w: u32, boost_w: u32 },
+    ResetCpuPower,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -41,6 +45,7 @@ pub enum Response {
     Drivers(Vec<DriverUpdate>),
     /// `failed`: Windows Update installed only some of them.
     Installed { reboot: bool, failed: bool },
+    CpuPower(crate::cpu_power::CpuPowerInfo),
     Ok,
     Error(String),
 }

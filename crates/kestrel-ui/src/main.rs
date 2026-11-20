@@ -7,7 +7,7 @@ use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
 use slint::{Model, ModelRc, SharedString, VecModel, Weak};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 slint::include_modules!();
@@ -92,6 +92,9 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_has_curve(s.caps.fan_curve);
     ui.set_cooler_boost(s.cooler_boost.unwrap_or(false));
     ui.set_has_charge(s.caps.charge_limit);
+    if !CPU_LOADED.swap(true, Ordering::Relaxed) {
+        load_cpu_power(ui.as_weak());
+    }
     ui.set_charge_limit(s.charge_limit.unwrap_or(100) as i32);
     ui.set_has_kbd(s.caps.kbd_backlight);
     ui.set_kbd_level(s.kbd_backlight.map(i32::from).unwrap_or(-1));
@@ -354,13 +357,49 @@ fn show_scenarios(ui: &AppWindow, list: Vec<Scenario>) {
 }
 
 static CURVE_POINTS: AtomicU64 = AtomicU64::new(0);
+static CPU_OK: AtomicBool = AtomicBool::new(false);
+static CPU_LOADED: AtomicBool = AtomicBool::new(false);
+/// Limits applied from the CPU card this session; "Save current" stores them in the profile.
+static LAST_CPU: std::sync::Mutex<Option<(u32, u32)>> = std::sync::Mutex::new(None);
+
+fn load_cpu_power(weak: Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        let r = kestrel_core::transport::client().and_then(|mut c| c.call(&Request::GetCpuPower));
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            let Ok(Response::CpuPower(i)) = r else { return };
+            CPU_OK.store(i.supported, Ordering::Relaxed);
+            ui.set_cpu_ok(i.supported);
+            ui.set_cpu_name(i.cpu.into());
+            ui.set_cpu_note(i.note.into());
+            if let (Some(s), Some(b)) = (i.sustained_w, i.boost_w) {
+                ui.set_cpu_sustained(s as i32);
+                ui.set_cpu_boost(b as i32);
+            }
+            show_profiles(&ui);
+        });
+    });
+}
+
+fn cpu_command(weak: Weak<AppWindow>, req: Request, applied: Option<(u32, u32)>) {
+    std::thread::spawn(move || {
+        let r = kestrel_core::transport::client().and_then(|mut c| c.command(&req));
+        let _ = weak.upgrade_in_event_loop(move |ui| match r {
+            Ok(()) => {
+                *LAST_CPU.lock().unwrap_or_else(|p| p.into_inner()) = applied;
+                ui.set_message(SharedString::new());
+                load_cpu_power(ui.as_weak());
+            }
+            Err(e) => ui.set_message(e.to_string().into()),
+        });
+    });
+}
 /// Profiles as listed: presets for this model first, then the user's own.
 static PROFILES: std::sync::Mutex<Vec<(Profile, bool)>> = std::sync::Mutex::new(Vec::new());
 
 fn show_profiles(ui: &AppWindow) {
     let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner()).clone();
     let points = CURVE_POINTS.load(Ordering::Relaxed) as usize;
-    let mut list: Vec<(Profile, bool)> = profiles::presets(&shown, points).into_iter().map(|p| (p, true)).collect();
+    let mut list: Vec<(Profile, bool)> = profiles::presets(&shown, points, CPU_OK.load(Ordering::Relaxed)).into_iter().map(|p| (p, true)).collect();
     list.extend(profiles::load().into_iter().filter(|p| shown.contains(&p.scenario)).map(|p| (p, false)));
     let items: Vec<ProfileItem> = list
         .iter()
@@ -388,6 +427,7 @@ fn save_profile(weak: Weak<AppWindow>, name: String, curves: bool) {
                 cooler_boost: st.cooler_boost.unwrap_or(false),
                 cpu_curve,
                 gpu_curve,
+                cpu_power: *LAST_CPU.lock().unwrap_or_else(|p| p.into_inner()),
             })
         })();
         let _ = weak.upgrade_in_event_loop(move |ui| match r {
@@ -513,12 +553,22 @@ fn main() -> Result<(), slint::PlatformError> {
         let w = w.clone();
         std::thread::spawn(move || {
             let r = kestrel_core::transport::client().and_then(|mut c| profiles::requests(&p).iter().try_for_each(|req| c.command(req)));
+            if r.is_ok() && p.cpu_power.is_some() {
+                *LAST_CPU.lock().unwrap_or_else(|p| p.into_inner()) = p.cpu_power;
+            }
             let msg: SharedString = r.err().map(|e| format!("{}: {e}", p.name)).unwrap_or_default().into();
             let gpu = w.upgrade().is_some_and(|ui| ui.get_curve_gpu());
             let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
             load_curve(w, gpu);
         });
     });
+    let w = ui.as_weak();
+    ui.on_set_cpu_power(move |s, b| {
+        let (s, b) = kestrel_core::cpu_power::clamp(s.max(0) as u32, b.max(0) as u32);
+        cpu_command(w.clone(), Request::SetCpuPower { sustained_w: s, boost_w: b }, Some((s, b)));
+    });
+    let w = ui.as_weak();
+    ui.on_reset_cpu_power(move || cpu_command(w.clone(), Request::ResetCpuPower, None));
     let w = ui.as_weak();
     ui.on_delete_profile(move |i| {
         let Some(ui) = w.upgrade() else { return };

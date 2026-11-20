@@ -1,6 +1,7 @@
 //! Shared code for the Kestrel service, tray and UI.
 
 pub mod automation;
+pub mod cpu_power;
 pub mod ec;
 pub mod fan;
 pub mod gpu;

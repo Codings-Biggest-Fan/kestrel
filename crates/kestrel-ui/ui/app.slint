@@ -144,6 +144,13 @@ export component AppWindow inherits Window {
     in property <string> message;
     in property <[ScenarioItem]> scenarios;
     in property <[ProfileItem]> profiles;
+    in property <bool> cpu-ok;
+    in property <string> cpu-name;
+    in property <string> cpu-note;
+    in-out property <int> cpu-sustained: 45;
+    in-out property <int> cpu-boost: 65;
+    callback set-cpu-power(int, int);
+    callback reset-cpu-power();
     in-out property <bool> save-curves;
     in-out property <string> profile-name;
     callback apply-profile(int);
@@ -324,6 +331,22 @@ export component AppWindow inherits Window {
                             Text { text: s.label; color: Theme.text; font-size: 15px; font-weight: 600; }
                             Text { text: s.hint; color: Theme.muted; font-size: 12px; } } }
                 }
+                if supported && cpu-name != "": Card { title: "CPU POWER LIMITS · EXPERIMENTAL";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: cpu-name + (cpu-note != "" ? " · " + cpu-note : "") + (cpu-ok ? ". Sustained is the long-run package power, boost the short-burst limit. The laptop's own temperature limits still apply." : ""); }
+                    if cpu-ok: HorizontalLayout { spacing: 8px; alignment: start;
+                        Text { text: "Sustained"; width: 80px; color: Theme.text; vertical-alignment: center; font-size: 13px; }
+                        Pill { width: 44px; label: "−"; clicked => { cpu-sustained = max(5, cpu-sustained - 5); } }
+                        Text { text: cpu-sustained + " W"; width: 64px; color: Theme.text; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; font-weight: 600; }
+                        Pill { width: 44px; label: "+"; clicked => { cpu-sustained = min(200, cpu-sustained + 5); cpu-boost = max(cpu-boost, cpu-sustained); } } }
+                    if cpu-ok: HorizontalLayout { spacing: 8px; alignment: start;
+                        Text { text: "Boost"; width: 80px; color: Theme.text; vertical-alignment: center; font-size: 13px; }
+                        Pill { width: 44px; label: "−"; clicked => { cpu-boost = max(cpu-sustained, cpu-boost - 5); } }
+                        Text { text: cpu-boost + " W"; width: 64px; color: Theme.text; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; font-weight: 600; }
+                        Pill { width: 44px; label: "+"; clicked => { cpu-boost = min(200, cpu-boost + 5); } } }
+                    if cpu-ok: HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 110px; label: "Apply"; selected: true; enabled: can-write; clicked => { set-cpu-power(cpu-sustained, cpu-boost); } }
+                        Pill { width: 110px; label: "Reset"; enabled: can-write; clicked => { reset-cpu-power(); } } } }
                 if supported: Card { title: "PROFILES";
                     Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
                         text: "A scenario with optional fan curves and Cooler Boost, applied in one click. Fan curves switch laptops like the Vector A16 HX to Extreme."; }

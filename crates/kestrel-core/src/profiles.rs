@@ -16,6 +16,9 @@ pub struct Profile {
     pub cpu_curve: Option<Vec<u8>>,
     #[serde(default)]
     pub gpu_curve: Option<Vec<u8>>,
+    /// CPU package limits `(sustained, boost)` in watts.
+    #[serde(default)]
+    pub cpu_power: Option<(u32, u32)>,
 }
 
 /// `n` speeds rising linearly from `lo` to `hi` %, rounded to 5 %.
@@ -30,13 +33,15 @@ pub fn ramp(lo: u8, hi: u8, n: usize) -> Vec<u8> {
 }
 
 /// Presets for a model that offers `scenarios` and has `curve_points` fan-curve points (0 = none).
-pub fn presets(scenarios: &[Scenario], curve_points: usize) -> Vec<Profile> {
+/// `cpu_power`: the CPU accepts power limits.
+pub fn presets(scenarios: &[Scenario], curve_points: usize, cpu_power: bool) -> Vec<Profile> {
     let p = |name: &str, scenario, cooler_boost, curve: Option<Vec<u8>>| Profile {
         name: name.into(),
         scenario,
         cooler_boost,
         cpu_curve: curve.clone(),
         gpu_curve: curve,
+        cpu_power: None,
     };
     let n = curve_points;
     let mut out = vec![
@@ -49,6 +54,11 @@ pub fn presets(scenarios: &[Scenario], curve_points: usize) -> Vec<Profile> {
         out.push(p("Gaming, strong fans", Scenario::Extreme, false, Some(ramp(40, 100, n))));
     }
     out.push(p("Max cooling", Scenario::Extreme, true, None));
+    if cpu_power {
+        out.push(Profile { cpu_power: Some((25, 35)), ..p("Cool and quiet, 25 W CPU", Scenario::Silent, false, None) });
+        let max = crate::cpu_power::MAX_W;
+        out.push(Profile { cpu_power: Some((max, max)), ..p("Unlimited: no CPU limit, max fans", Scenario::Extreme, true, None) });
+    }
     out.retain(|x| scenarios.contains(&x.scenario));
     out
 }
@@ -74,6 +84,9 @@ pub fn save(list: &[Profile]) -> std::io::Result<()> {
 /// Extreme on models that only follow curves there, and Cooler Boost is set last.
 pub fn requests(p: &Profile) -> Vec<Request> {
     let mut r = vec![Request::SetScenario(p.scenario)];
+    if let Some((sustained_w, boost_w)) = p.cpu_power {
+        r.push(Request::SetCpuPower { sustained_w, boost_w });
+    }
     if let Some(c) = &p.cpu_curve {
         r.push(Request::SetFanCurve { gpu: false, speeds: c.clone() });
     }
@@ -93,6 +106,9 @@ pub fn describe(p: &Profile) -> String {
     if p.cooler_boost {
         parts.push("Cooler Boost".into());
     }
+    if let Some((s, b)) = p.cpu_power {
+        parts.push(format!("CPU {s}/{b} W"));
+    }
     parts.join(" · ")
 }
 
@@ -109,15 +125,19 @@ mod tests {
     #[test]
     fn presets_follow_the_model() {
         let vector = [Scenario::Extreme, Scenario::Balanced, Scenario::Silent];
-        let names: Vec<String> = presets(&vector, 6).into_iter().map(|p| p.name).collect();
+        let names: Vec<String> = presets(&vector, 6, false).into_iter().map(|p| p.name).collect();
         assert_eq!(names.len(), 6);
-        assert!(presets(&vector, 0).iter().all(|p| p.cpu_curve.is_none()));
-        assert!(presets(&[], 6).is_empty());
+        assert!(presets(&vector, 0, false).iter().all(|p| p.cpu_curve.is_none()));
+        assert!(presets(&[], 6, true).is_empty());
+        let full = presets(&vector, 6, true);
+        assert_eq!(full.len(), 8);
+        let r = requests(full.last().unwrap());
+        assert!(matches!(r[1], Request::SetCpuPower { .. }));
     }
 
     #[test]
     fn apply_order() {
-        let p = &presets(&[Scenario::Extreme], 6)[1];
+        let p = &presets(&[Scenario::Extreme], 6, false)[1];
         let r = requests(p);
         assert_eq!(r.first(), Some(&Request::SetScenario(Scenario::Extreme)));
         assert!(matches!(r[1], Request::SetFanCurve { gpu: false, .. }));
