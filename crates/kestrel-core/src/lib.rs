@@ -8,6 +8,7 @@ pub mod ipc;
 pub mod journal;
 pub mod model;
 pub mod power;
+pub mod profiles;
 pub mod scenario;
 pub mod transport;
 

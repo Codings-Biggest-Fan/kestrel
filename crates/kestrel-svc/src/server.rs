@@ -200,6 +200,7 @@ fn status(st: &mut State) -> Status {
             shift_modes: c.shift_mode.as_ref().map(|m| m.modes.keys().cloned().collect()).unwrap_or_default(),
             fan_curve: c.fan_curve.is_some(),
             scenarios: Scenario::available(c),
+            curve_points: c.fan_curve.map_or(0, |f| f.points),
         };
         s.cooler_boost = ec.cooler_boost().ok();
         s.charge_limit = ec.charge_limit().ok().flatten();

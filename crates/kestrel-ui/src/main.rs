@@ -2,6 +2,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use kestrel_core::automation::{AppRule, Automation};
+use kestrel_core::profiles::{self, Profile};
 use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
 use slint::{Model, ModelRc, SharedString, VecModel, Weak};
@@ -64,6 +65,9 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_supported(s.model.map_id.is_some());
     if !s.caps.scenarios.is_empty() && *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) != s.caps.scenarios {
         show_scenarios(ui, s.caps.scenarios.clone());
+    }
+    if CURVE_POINTS.swap(s.caps.curve_points.into(), Ordering::Relaxed) != u64::from(s.caps.curve_points) || ui.get_profiles().row_count() == 0 {
+        show_profiles(ui);
     }
     ui.set_scenario(shown_index(s.scenario));
     ui.set_cpu_temp(opt(s.cpu_temp, ""));
@@ -349,6 +353,62 @@ fn show_scenarios(ui: &AppWindow, list: Vec<Scenario>) {
     ui.set_auto_ac(shown_index(auto.ac_scenario));
 }
 
+static CURVE_POINTS: AtomicU64 = AtomicU64::new(0);
+/// Profiles as listed: presets for this model first, then the user's own.
+static PROFILES: std::sync::Mutex<Vec<(Profile, bool)>> = std::sync::Mutex::new(Vec::new());
+
+fn show_profiles(ui: &AppWindow) {
+    let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    let points = CURVE_POINTS.load(Ordering::Relaxed) as usize;
+    let mut list: Vec<(Profile, bool)> = profiles::presets(&shown, points).into_iter().map(|p| (p, true)).collect();
+    list.extend(profiles::load().into_iter().filter(|p| shown.contains(&p.scenario)).map(|p| (p, false)));
+    let items: Vec<ProfileItem> = list
+        .iter()
+        .map(|(p, preset)| ProfileItem { name: p.name.clone().into(), desc: profiles::describe(p).into(), preset: *preset })
+        .collect();
+    *PROFILES.lock().unwrap_or_else(|p| p.into_inner()) = list;
+    ui.set_profiles(ModelRc::new(VecModel::from(items)));
+}
+
+fn save_profile(weak: Weak<AppWindow>, name: String, curves: bool) {
+    std::thread::spawn(move || {
+        let r = (|| -> std::io::Result<Profile> {
+            let mut c = kestrel_core::transport::client()?;
+            let st = c.status()?;
+            let scenario = st.scenario.ok_or_else(|| std::io::Error::other("Choose a scenario first, then save the profile."))?;
+            let curve = |c: &mut kestrel_core::ipc::Client<kestrel_core::transport::Stream>, gpu| match c.call(&Request::GetFanCurve { gpu })? {
+                Response::FanCurve { speeds, .. } => Ok(Some(speeds)),
+                Response::Error(e) => Err(std::io::Error::other(e)),
+                other => Err(std::io::Error::other(format!("unexpected reply: {other:?}"))),
+            };
+            let (cpu_curve, gpu_curve) = if curves && st.caps.fan_curve { (curve(&mut c, false)?, curve(&mut c, true)?) } else { (None, None) };
+            Ok(Profile {
+                name,
+                scenario,
+                cooler_boost: st.cooler_boost.unwrap_or(false),
+                cpu_curve,
+                gpu_curve,
+            })
+        })();
+        let _ = weak.upgrade_in_event_loop(move |ui| match r {
+            Ok(p) => {
+                let mut list = profiles::load();
+                list.retain(|x| x.name != p.name);
+                list.push(p);
+                match profiles::save(&list) {
+                    Ok(()) => {
+                        ui.set_message(SharedString::new());
+                        ui.set_profile_name(SharedString::new());
+                    }
+                    Err(e) => ui.set_message(e.to_string().into()),
+                }
+                show_profiles(&ui);
+            }
+            Err(e) => ui.set_message(e.to_string().into()),
+        });
+    });
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
     show_scenarios(&ui, Scenario::ALL.to_vec());
@@ -447,6 +507,34 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_restore(move || send(w.clone(), Request::RestoreDefaults));
     let w = ui.as_weak();
     ui.on_load_curve(move |gpu| load_curve(w.clone(), gpu));
+    let w = ui.as_weak();
+    ui.on_apply_profile(move |i| {
+        let Some(p) = usize::try_from(i).ok().and_then(|i| PROFILES.lock().unwrap_or_else(|p| p.into_inner()).get(i).map(|x| x.0.clone())) else { return };
+        let w = w.clone();
+        std::thread::spawn(move || {
+            let r = kestrel_core::transport::client().and_then(|mut c| profiles::requests(&p).iter().try_for_each(|req| c.command(req)));
+            let msg: SharedString = r.err().map(|e| format!("{}: {e}", p.name)).unwrap_or_default().into();
+            let gpu = w.upgrade().is_some_and(|ui| ui.get_curve_gpu());
+            let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
+            load_curve(w, gpu);
+        });
+    });
+    let w = ui.as_weak();
+    ui.on_delete_profile(move |i| {
+        let Some(ui) = w.upgrade() else { return };
+        let Some((p, false)) = usize::try_from(i).ok().and_then(|i| PROFILES.lock().unwrap_or_else(|p| p.into_inner()).get(i).cloned()) else { return };
+        let mut list = profiles::load();
+        list.retain(|x| x.name != p.name);
+        ui.set_message(profiles::save(&list).err().map(|e| e.to_string()).unwrap_or_default().into());
+        show_profiles(&ui);
+    });
+    let w = ui.as_weak();
+    ui.on_save_profile(move |name, curves| {
+        let name = name.trim().to_string();
+        if !name.is_empty() {
+            save_profile(w.clone(), name, curves);
+        }
+    });
     let w = ui.as_weak();
     ui.on_curve_resize(move |gw, gh| {
         let Some(ui) = w.upgrade() else { return };
