@@ -61,6 +61,8 @@ pub struct Status {
     pub cpu_fan_pct: Option<u8>,
     pub gpu_temp: Option<u8>,
     pub gpu_fan_pct: Option<u8>,
+    pub cpu_fan_rpm: Option<u32>,
+    pub gpu_fan_rpm: Option<u32>,
     pub cpu_load_pct: f32,
     pub ram_used_mb: u32,
     pub ram_total_mb: u32,
