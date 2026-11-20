@@ -1,6 +1,7 @@
 //! kestrel-ui: main window. Talks to kestrel-svc over IPC and exits when closed.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+use kestrel_core::automation::Automation;
 use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
 use slint::{Model, ModelRc, SharedString, VecModel, Weak};
@@ -164,6 +165,17 @@ fn load_lights(weak: Weak<AppWindow>) {
     });
 }
 
+fn load_lid(weak: Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        let lid = kestrel_core::power::lid_actions();
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            let (ac, dc) = lid.map_or((-1, -1), |(a, d)| (i32::from(a), i32::from(d)));
+            ui.set_lid_ac(ac);
+            ui.set_lid_dc(dc);
+        });
+    });
+}
+
 static CURVE_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// Only the newest load for the selected fan may fill the editor; Apply stays disabled
@@ -227,6 +239,32 @@ fn main() -> Result<(), slint::PlatformError> {
         send(w.clone(), Request::SetLighting { device: id.to_string(), color, brightness: bright.clamp(0, 100) as u8 });
     });
     load_lights(ui.as_weak());
+    let auto = Automation::load();
+    let idx = |s: Option<Scenario>| s.map_or(-1, |s| s.index() as i32);
+    ui.set_auto_bat(idx(auto.battery_scenario));
+    ui.set_auto_ac(idx(auto.ac_scenario));
+    ui.set_auto_60hz(auto.battery_60hz);
+    let w = ui.as_weak();
+    ui.on_set_auto(move |bat, ac, hz60| {
+        let pick = |i: i32| usize::try_from(i).ok().and_then(Scenario::from_index);
+        let a = Automation { battery_scenario: pick(bat), ac_scenario: pick(ac), battery_60hz: hz60 };
+        let msg: SharedString = a.save().err().map(|e| format!("Could not save automation: {e}")).unwrap_or_default().into();
+        if let Some(ui) = w.upgrade() {
+            ui.set_message(msg);
+        }
+    });
+    let w = ui.as_weak();
+    ui.on_set_lid(move |ac, v| {
+        let w = w.clone();
+        std::thread::spawn(move || {
+            let r = kestrel_core::power::set_lid_action(ac, v.clamp(0, 3) as u8);
+            let msg: SharedString = r.err().unwrap_or_default().into();
+            let w2 = w.clone();
+            let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
+            load_lid(w2);
+        });
+    });
+    load_lid(ui.as_weak());
     let w = ui.as_weak();
     ui.on_restore(move || send(w.clone(), Request::RestoreDefaults));
     let w = ui.as_weak();

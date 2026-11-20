@@ -179,6 +179,13 @@ export component AppWindow inherits Window {
     in-out property <int> light-swatch: 0;
     in-out property <int> light-bright: 100;
     callback load-lights();
+    in-out property <int> auto-bat: -1;
+    in-out property <int> auto-ac: -1;
+    in-out property <bool> auto-60hz;
+    in property <int> lid-ac: -1;
+    in property <int> lid-dc: -1;
+    callback set-auto(int, int, bool);
+    callback set-lid(bool, int);
     callback set-light(string, int, int);
     callback restore();
     in property <bool> has-curve;
@@ -366,7 +373,7 @@ export component AppWindow inherits Window {
                 Rectangle {}
             }
 
-            if page == 5: VerticalLayout {
+            if page == 5: Flickable { VerticalLayout {
                 spacing: 16px;
                 Card { title: "THIS LAPTOP";
                     Text { text: model-name; color: Theme.text; font-size: 16px; font-weight: 600; }
@@ -375,12 +382,33 @@ export component AppWindow inherits Window {
                         text: "Unknown model: no register map matches this firmware, so Kestrel only shows system stats."; }
                     if connected && supported && read-only: Text { wrap: word-wrap; color: Theme.warn;
                         text: "Read-only: this firmware's register map is not confirmed on owner hardware, so Kestrel only reads sensors."; } }
+                Card { title: "POWER AUTOMATION";
+                    Text { text: "On battery"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 110px; label: "No change"; selected: auto-bat == -1; clicked => { auto-bat = -1; set-auto(auto-bat, auto-ac, auto-60hz); } }
+                        for s[i] in scenarios: Pill { width: 110px; label: s.label; selected: auto-bat == i; enabled: supported && !read-only; clicked => { auto-bat = i; set-auto(auto-bat, auto-ac, auto-60hz); } } }
+                    Text { text: "Plugged in"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 110px; label: "No change"; selected: auto-ac == -1; clicked => { auto-ac = -1; set-auto(auto-bat, auto-ac, auto-60hz); } }
+                        for s[i] in scenarios: Pill { width: 110px; label: s.label; selected: auto-ac == i; enabled: supported && !read-only; clicked => { auto-ac = i; set-auto(auto-bat, auto-ac, auto-60hz); } } }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 230px; label: auto-60hz ? "60 Hz on battery: on" : "60 Hz on battery: off"; selected: auto-60hz;
+                            clicked => { auto-60hz = !auto-60hz; set-auto(auto-bat, auto-ac, auto-60hz); } } }
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "Applied by the tray when you plug in or unplug, so keep kestrel-tray running. 60 Hz returns to the highest rate on AC."; } }
+                Card { title: "WHEN I CLOSE THE LID";
+                    Text { text: "On battery"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        for a[i] in ["Do nothing", "Sleep", "Hibernate", "Shut down"]: Pill { width: 110px; label: a; selected: lid-dc == i; enabled: lid-dc >= 0; clicked => { set-lid(false, i); } } }
+                    Text { text: "Plugged in"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        for a[i] in ["Do nothing", "Sleep", "Hibernate", "Shut down"]: Pill { width: 110px; label: a; selected: lid-ac == i; enabled: lid-ac >= 0; clicked => { set-lid(true, i); } } }
+                    if lid-ac < 0: Text { text: "Could not read the Windows power plan."; color: Theme.muted; font-size: 12px; } }
                 if supported: Card { title: "SAFETY";
                     HorizontalLayout { alignment: start;
                         Pill { width: 230px; label: "Restore original EC values"; enabled: can-write; clicked => { restore(); } } }
                     Text { text: "Every register Kestrel changes is saved first and can be put back."; color: Theme.muted; font-size: 12px; } }
-                Rectangle {}
-            }
+            } }
         }
     }
 }

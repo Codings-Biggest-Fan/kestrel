@@ -2,6 +2,8 @@
 //! so it idles at a few MB. Left click opens the main window (kestrel-ui).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg(windows)]
+use kestrel_core::automation::Automation;
 use kestrel_core::ipc::Request;
 use kestrel_core::scenario::Scenario;
 
@@ -76,12 +78,87 @@ mod win {
             let tip: Vec<u16> = "Kestrel".encode_utf16().collect();
             nid.szTip[..tip.len()].copy_from_slice(&tip);
             let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+            std::thread::Builder::new().name("power".into()).stack_size(128 * 1024).spawn(power_watch).ok();
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
             let _ = Shell_NotifyIconW(NIM_DELETE, &icon_data(hwnd));
+        }
+    }
+
+    fn on_ac() -> Option<bool> {
+        use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+        let mut s = SYSTEM_POWER_STATUS::default();
+        unsafe { GetSystemPowerStatus(&mut s) }.ok()?;
+        match s.ACLineStatus {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        }
+    }
+
+    /// Applies the user's power automation on every battery/AC transition.
+    fn power_watch() {
+        let mut last = on_ac();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            let now = on_ac();
+            if let (Some(prev), Some(ac)) = (last, now) {
+                if prev != ac {
+                    let a = Automation::load().on_power_change(ac);
+                    if let Some(s) = a.scenario {
+                        let _ = send(Request::SetScenario(s));
+                    }
+                    if let Some(r) = a.refresh {
+                        let _ = display::set(r);
+                    }
+                }
+            }
+            if now.is_some() {
+                last = now;
+            }
+        }
+    }
+
+    mod display {
+        use kestrel_core::automation::{pick_refresh, Refresh};
+        use windows::core::PCWSTR;
+        use windows::Win32::Graphics::Gdi::*;
+
+        fn mode() -> DEVMODEW {
+            DEVMODEW { dmSize: std::mem::size_of::<DEVMODEW>() as u16, ..Default::default() }
+        }
+
+        /// Changes the primary display's refresh rate, keeping its resolution and colour depth.
+        pub fn set(want: Refresh) -> Result<u32, String> {
+            unsafe {
+                let mut cur = mode();
+                if !EnumDisplaySettingsW(PCWSTR::null(), ENUM_CURRENT_SETTINGS, &mut cur).as_bool() {
+                    return Err("cannot read the display mode".into());
+                }
+                let mut rates = Vec::new();
+                let mut m = mode();
+                let mut i = 0;
+                while EnumDisplaySettingsW(PCWSTR::null(), ENUM_DISPLAY_SETTINGS_MODE(i), &mut m).as_bool() {
+                    if (m.dmPelsWidth, m.dmPelsHeight, m.dmBitsPerPel) == (cur.dmPelsWidth, cur.dmPelsHeight, cur.dmBitsPerPel) {
+                        rates.push(m.dmDisplayFrequency);
+                    }
+                    i += 1;
+                }
+                let hz = pick_refresh(&rates, want).ok_or("no matching refresh rate")?;
+                if hz == cur.dmDisplayFrequency {
+                    return Ok(hz);
+                }
+                cur.dmDisplayFrequency = hz;
+                cur.dmFields = DM_DISPLAYFREQUENCY;
+                let r = ChangeDisplaySettingsExW(PCWSTR::null(), Some(&cur), None, CDS_UPDATEREGISTRY, None);
+                if r != DISP_CHANGE_SUCCESSFUL {
+                    return Err(format!("ChangeDisplaySettingsEx failed ({})", r.0));
+                }
+                Ok(hz)
+            }
         }
     }
 
