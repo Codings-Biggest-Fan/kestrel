@@ -58,3 +58,19 @@ Sources: msi-ec (GPL-2.0-or-later), GhostDeck (GPL-3.0), Linux `msi-wmi-platform
 Sources: AeroCtl (GPL-3.0, method names and argument shapes), gigabyte-laptop-wmi (GPL-2.0-or-later,
 fan modes, 15-point curve, 60-100 % charge range). Develop without hardware with
 `kestrel-svc --mock gigabyte`.
+
+## Creative Sound BlasterX G6 (USB DAC/amp)
+
+- Found by HID device path `vid_041e&pid_3256&mi_04`; opened only if it answers the firmware query
+  `5a 07 01 02`. Independent of the laptop backend: works next to MSI, GIGABYTE or unknown laptops.
+- 64-byte reports (`5a [family] ...`, report ID 0). Kestrel covers output (`0x2c`, headphones/speakers),
+  SBX and Scout Mode (`0x26`) and the playback effects in DSP family `0x96`: Surround `00/01`,
+  Dialog+ `02/03`, Smart Volume `04/05`, Crystalizer `07/08`, Bass `18/19` (on / level 0.0-1.0).
+- Every write is followed by a read of the same setting; the UI only shows what the device answered,
+  and a write the device does not confirm is reported as an error. Settings are re-read every 5 s so the
+  front-panel button and knob show up.
+- Develop without the device: any `--mock` mode also simulates a G6.
+
+Protocol credit: Nils Skowasch ([soundblaster-x-g6-cli](https://github.com/nils-skowasch/soundblaster-x-g6-cli)),
+[linuxblaster_control](https://github.com/RizeCrime/linuxblaster_control) and
+[Rusty G6](https://github.com/jackbrumley/rusty-g6), who captured these commands. Kestrel's code is its own.

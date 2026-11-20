@@ -1,6 +1,7 @@
 //! IPC server: one thread per client, all hardware access behind one lock.
 
 use crate::sysinfo::Sampler;
+use kestrel_core::creative::SoundBlaster;
 use kestrel_core::ipc::{
     read_frame, write_frame, ModelInfo, Request, Response, Status, PROTOCOL_VERSION,
 };
@@ -8,13 +9,32 @@ use kestrel_core::laptop::Laptop;
 use kestrel_core::scenario::Scenario;
 use kestrel_core::transport::{Listener, Stream};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 pub struct State {
     pub ec: Option<Box<dyn Laptop>>,
     pub model: ModelInfo,
     pub scenario: Option<Scenario>,
     pub sampler: Sampler,
+    pub audio: Option<Audio>,
 }
+
+pub struct Audio {
+    pub dev: SoundBlaster,
+    pub refreshed: Instant,
+}
+
+impl Audio {
+    pub fn new(dev: SoundBlaster) -> Self {
+        Self {
+            dev,
+            refreshed: Instant::now(),
+        }
+    }
+}
+
+/// The G6's front knob and output button change settings behind our back.
+const AUDIO_REFRESH: Duration = Duration::from_secs(5);
 
 pub type Shared = Arc<Mutex<State>>;
 
@@ -117,6 +137,10 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
             }
             result(r.map(|_| ()))
         }
+        Request::SetAudio(a) => match st.audio.as_mut() {
+            Some(au) => result(au.dev.set(a).map_err(|e| e.to_string())),
+            None => Response::Error("no Sound Blaster connected".into()),
+        },
         Request::RestoreDefaults => {
             st.scenario = None;
             result(with_ec(st, |ec| ec.restore().map(|_| ())))
@@ -148,6 +172,13 @@ fn status(st: &mut State) -> Status {
         battery_pct: sys.battery_pct,
         ..Default::default()
     };
+    if let Some(au) = st.audio.as_mut() {
+        if au.refreshed.elapsed() >= AUDIO_REFRESH {
+            au.dev.refresh();
+            au.refreshed = Instant::now();
+        }
+        s.audio = Some(au.dev.state().clone());
+    }
     if let Some(ec) = st.ec.as_mut() {
         s.caps = ec.caps();
         s.cooler_boost = ec.cooler_boost().ok();

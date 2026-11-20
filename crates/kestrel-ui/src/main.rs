@@ -1,6 +1,7 @@
 //! kestrel-ui: main window. Talks to kestrel-svc over IPC and exits when closed.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+use kestrel_core::creative::{AudioSetting, Effect, Output};
 use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
 use slint::{Model, ModelRc, SharedString, VecModel, Weak};
@@ -115,6 +116,31 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_charge_limit(s.charge_limit.unwrap_or(100) as i32);
     ui.set_has_kbd(s.caps.kbd_backlight);
     ui.set_kbd_level(s.kbd_backlight.map(i32::from).unwrap_or(-1));
+    let a = s.audio.clone().unwrap_or_default();
+    ui.set_has_audio(s.audio.is_some());
+    ui.set_audio_name(a.device.into());
+    ui.set_audio_firmware(a.firmware.into());
+    ui.set_audio_output(match a.output {
+        Some(Output::Headphones) => 0,
+        Some(Output::Speakers) => 1,
+        None => -1,
+    });
+    ui.set_audio_sbx(a.sbx.map_or(-1, i32::from));
+    ui.set_audio_scout(a.scout.map_or(-1, i32::from));
+    let effects: Vec<AudioEffect> = Effect::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let st = a.effects.get(i).copied().flatten();
+            AudioEffect {
+                label: e.label().into(),
+                known: st.is_some(),
+                on: st.is_some_and(|x| x.on),
+                level: st.map_or(0, |x| i32::from(x.level)),
+            }
+        })
+        .collect();
+    ui.set_audio_effects(ModelRc::new(VecModel::from(effects)));
     ui.set_temp_history(history(temps));
     ui.set_cpu_history(history(loads));
 }
@@ -233,6 +259,34 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_charge(move |p| send(w.clone(), Request::SetChargeLimit(p.clamp(10, 100) as u8)));
     let w = ui.as_weak();
     ui.on_set_kbd(move |l| send(w.clone(), Request::SetKbdBacklight(l.clamp(0, 3) as u8)));
+    let w = ui.as_weak();
+    ui.on_set_audio_output(move |o| {
+        let o = if o == 1 {
+            Output::Speakers
+        } else {
+            Output::Headphones
+        };
+        send(w.clone(), Request::SetAudio(AudioSetting::Output(o)))
+    });
+    let w = ui.as_weak();
+    ui.on_set_audio_sbx(move |on| send(w.clone(), Request::SetAudio(AudioSetting::Sbx(on))));
+    let w = ui.as_weak();
+    ui.on_set_audio_scout(move |on| send(w.clone(), Request::SetAudio(AudioSetting::Scout(on))));
+    let w = ui.as_weak();
+    ui.on_set_effect_on(move |i, on| {
+        if let Some(&e) = Effect::ALL.get(i as usize) {
+            send(w.clone(), Request::SetAudio(AudioSetting::EffectOn(e, on)));
+        }
+    });
+    let w = ui.as_weak();
+    ui.on_set_effect_level(move |i, l| {
+        if let Some(&e) = Effect::ALL.get(i as usize) {
+            send(
+                w.clone(),
+                Request::SetAudio(AudioSetting::EffectLevel(e, l.clamp(0, 100) as u8)),
+            );
+        }
+    });
     let w = ui.as_weak();
     ui.on_restore(move || send(w.clone(), Request::RestoreDefaults));
     let w = ui.as_weak();

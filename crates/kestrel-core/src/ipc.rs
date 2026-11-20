@@ -30,6 +30,7 @@ pub enum Request {
     },
     /// Put every register Kestrel changed back to its original value.
     RestoreDefaults,
+    SetAudio(crate::creative::AudioSetting),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,6 +82,9 @@ pub struct Status {
     pub ram_total_mb: u32,
     pub on_ac: Option<bool>,
     pub battery_pct: Option<u8>,
+    /// A connected Sound Blaster, as it last reported itself.
+    #[serde(default)]
+    pub audio: Option<crate::creative::AudioState>,
 }
 
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {

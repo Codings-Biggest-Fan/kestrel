@@ -5,8 +5,11 @@
 //!   kestrel-svc --console          run in the foreground
 //!   kestrel-svc --mock <FW_ID>     foreground with an in-memory EC (development, CI)
 //!   kestrel-svc --mock gigabyte    foreground with an in-memory GIGABYTE WMI interface
+//!   (mock modes also simulate a Sound BlasterX G6)
 //!   kestrel-svc install|uninstall  register / remove the Windows service
 
+#[cfg(windows)]
+mod hid_win;
 mod server;
 #[cfg(windows)]
 mod service;
@@ -17,6 +20,7 @@ mod wmi_ec;
 #[cfg(windows)]
 mod wmi_gb;
 
+use kestrel_core::creative::{HidIo, MockG6, SoundBlaster};
 use kestrel_core::ec::{read_firmware_id, EcIo, MockEc, MsiEc};
 use kestrel_core::gigabyte::{GbIo, Gigabyte, MockGb};
 use kestrel_core::ipc::ModelInfo;
@@ -55,7 +59,10 @@ fn main() {
 }
 
 pub fn run(mock_fw: Option<String>) -> Result<(), String> {
-    let state = Arc::new(Mutex::new(init(mock_fw)));
+    let mock = mock_fw.is_some();
+    let mut st = init(mock_fw);
+    st.audio = open_audio(mock).map(server::Audio::new);
+    let state = Arc::new(Mutex::new(st));
     {
         let st = state.lock().unwrap();
         eprintln!(
@@ -103,6 +110,39 @@ fn open_backend(mock_fw: Option<String>) -> Result<(Box<dyn EcIo>, String), Stri
     Err("no EC backend on this platform; use --mock <FW_ID>".into())
 }
 
+/// A Creative Sound BlasterX G6, if one is plugged in and answers.
+fn open_audio(mock: bool) -> Option<SoundBlaster> {
+    let io: Box<dyn HidIo> = if mock {
+        Box::new(MockG6::new())
+    } else {
+        #[cfg(windows)]
+        match hid_win::HidDevice::open(
+            kestrel_core::creative::VID,
+            kestrel_core::creative::PID_G6,
+            kestrel_core::creative::INTERFACE,
+        ) {
+            Ok(Some(d)) => Box::new(d),
+            Ok(None) => return None,
+            Err(e) => {
+                eprintln!("Sound Blaster G6: {e}");
+                return None;
+            }
+        }
+        #[cfg(not(windows))]
+        return None;
+    };
+    match SoundBlaster::new(io, "Sound BlasterX G6") {
+        Ok(sb) => {
+            eprintln!("Sound BlasterX G6 firmware {}", sb.state().firmware);
+            Some(sb)
+        }
+        Err(e) => {
+            eprintln!("Sound Blaster G6: {e}");
+            None
+        }
+    }
+}
+
 fn init(mock_fw: Option<String>) -> State {
     let settings = settings::Settings::load();
     if let Some((io, ident)) = open_gigabyte(mock_fw.as_deref()) {
@@ -145,6 +185,7 @@ fn init(mock_fw: Option<String>) -> State {
         model,
         scenario: None,
         sampler: Default::default(),
+        audio: None,
     }
 }
 
@@ -202,5 +243,6 @@ fn init_gigabyte(
         model,
         scenario: None,
         sampler: Default::default(),
+        audio: None,
     }
 }

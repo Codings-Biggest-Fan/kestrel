@@ -1,5 +1,6 @@
 //! Shared code for the Kestrel service, tray and UI.
 
+pub mod creative;
 pub mod ec;
 pub mod fan;
 pub mod gigabyte;
