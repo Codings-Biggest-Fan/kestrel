@@ -104,6 +104,7 @@ mod win {
         // `None` first, so the settings for the current power source apply when the tray starts.
         let mut last: Option<bool> = None;
         let mut app = AppState::default();
+        let mut sched = AppState::default();
         loop {
             let now = on_ac();
             if let Some(ac) = now {
@@ -119,6 +120,7 @@ mod win {
                     }
                 }
             }
+            apply_schedule(&mut sched);
             apply_app_rules(&mut app);
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
@@ -151,6 +153,44 @@ mod win {
         if st.active.is_none() {
             st.before = None;
         }
+    }
+
+    fn local_minute() -> u16 {
+        let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+        t.wHour * 60 + t.wMinute
+    }
+
+    /// Switches when a schedule window starts. When it ends, the earlier scenario comes back,
+    /// unless something else changed the scenario in the meantime.
+    fn apply_schedule(st: &mut AppState) {
+        let auto = Automation::load();
+        if auto.schedule.is_empty() && st.active.is_none() {
+            return;
+        }
+        let want = auto.scheduled(local_minute());
+        if want == st.active {
+            return;
+        }
+        let current = current().and_then(|(s, _)| s);
+        match want {
+            Some(s) => {
+                if send(Request::SetScenario(s)).is_err() {
+                    return;
+                }
+                if st.active.is_none() {
+                    st.before = current;
+                }
+            }
+            None => {
+                if let (Some(b), true) = (st.before, current == st.active) {
+                    if send(Request::SetScenario(b)).is_err() {
+                        return;
+                    }
+                }
+                st.before = None;
+            }
+        }
+        st.active = want;
     }
 
     fn running_exes() -> Vec<String> {
