@@ -60,6 +60,9 @@ mod win {
     const ID_BOOST: usize = 2;
     const ID_QUIT: usize = 3;
     const ID_SCENARIO: usize = 100;
+    const HK_SCENARIO: i32 = 1;
+    const HK_BOOST: i32 = 2;
+    static BOOST_HOTKEY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
     pub fn run() {
         unsafe {
@@ -75,9 +78,10 @@ mod win {
             nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
             nid.uCallbackMessage = WM_TRAY;
             nid.hIcon = LoadIconW(Some(hinst.into()), PCWSTR(1 as _)).or_else(|_| LoadIconW(None, IDI_APPLICATION)).unwrap_or_default();
-            let tip: Vec<u16> = "Kestrel".encode_utf16().collect();
+            let tip: Vec<u16> = "Kestrel - Ctrl+Alt+F11 next scenario".encode_utf16().collect();
             nid.szTip[..tip.len()].copy_from_slice(&tip);
             let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+            register_hotkeys(hwnd);
             std::thread::Builder::new().name("power".into()).stack_size(128 * 1024).spawn(power_watch).ok();
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -215,6 +219,45 @@ mod win {
         NOTIFYICONDATAW { cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32, hWnd: hwnd, uID: 1, ..Default::default() }
     }
 
+    /// Ctrl+Alt+F11 cycles scenarios, Ctrl+Alt+F10 toggles Cooler Boost. Function keys, because
+    /// AltGr is Ctrl+Alt and Ctrl+Alt+letter would swallow characters on many layouts (F9 is
+    /// taken by Excel, F12 is reserved for the debugger). A
+    /// combination another program already owns is skipped.
+    unsafe fn register_hotkeys(hwnd: HWND) {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, VK_F10, VK_F11};
+        let mods = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT;
+        for (id, key, name) in [(HK_SCENARIO, VK_F11, "F11"), (HK_BOOST, VK_F10, "F10")] {
+            if RegisterHotKey(Some(hwnd), id, mods, key.0 as u32).is_ok() {
+                if id == HK_BOOST {
+                    BOOST_HOTKEY.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            } else {
+                eprintln!("hotkey Ctrl+Alt+{name} is taken by another program");
+            }
+        }
+    }
+
+    fn on_hotkey(id: i32) {
+        let Ok(status) = kestrel_core::transport::client().and_then(|mut c| c.status()) else { return };
+        match id {
+            HK_SCENARIO => {
+                let shown = status.caps.scenarios;
+                if shown.is_empty() {
+                    return;
+                }
+                let next = match status.scenario.and_then(|s| shown.iter().position(|x| *x == s)) {
+                    Some(i) => shown[(i + 1) % shown.len()],
+                    None => shown[0],
+                };
+                let _ = send(Request::SetScenario(next));
+            }
+            HK_BOOST => {
+                let _ = send(Request::SetCoolerBoost(status.cooler_boost != Some(true)));
+            }
+            _ => {}
+        }
+    }
+
     unsafe fn show_menu(hwnd: HWND) {
         let Ok(menu) = CreatePopupMenu() else { return };
         let (scenario, boost) = current().unwrap_or((None, None));
@@ -233,7 +276,8 @@ mod win {
         }
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
         let boost_flags = if boost == Some(true) { MF_STRING | MF_CHECKED } else if connected { MF_STRING } else { MF_STRING | MF_GRAYED };
-        let _ = AppendMenuW(menu, boost_flags, ID_BOOST, w!("Cooler Boost"));
+        let boost_label = if BOOST_HOTKEY.load(std::sync::atomic::Ordering::Relaxed) { w!("Cooler Boost\tCtrl+Alt+F10") } else { w!("Cooler Boost") };
+        let _ = AppendMenuW(menu, boost_flags, ID_BOOST, boost_label);
         let _ = AppendMenuW(menu, MF_STRING, ID_OPEN, w!("Open Kestrel"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
         let _ = AppendMenuW(menu, MF_STRING, ID_QUIT, w!("Quit tray"));
@@ -255,6 +299,11 @@ mod win {
     }
 
     unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+        if msg == WM_HOTKEY {
+            let id = wp.0 as i32;
+            std::thread::Builder::new().stack_size(128 * 1024).spawn(move || on_hotkey(id)).ok();
+            return LRESULT(0);
+        }
         if msg == WM_TRAY {
             match lp.0 as u32 {
                 WM_LBUTTONUP => open_ui(),
