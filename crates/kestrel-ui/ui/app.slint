@@ -145,6 +145,7 @@ export component AppWindow inherits Window {
     in property <[ScenarioItem]> scenarios;
     in property <[ProfileItem]> profiles;
     in-out property <bool> save-curves;
+    in-out property <string> profile-name;
     callback apply-profile(int);
     callback delete-profile(int);
     callback save-profile(string, bool);
@@ -335,11 +336,11 @@ export component AppWindow inherits Window {
                             if !p.preset: Pill { width: 90px; label: "Delete"; clicked => { delete-profile(i); } } } }
                     HorizontalLayout { spacing: 8px; alignment: start;
                         Rectangle { width: 200px; height: 34px; border-radius: 8px; background: #0f1115; border-width: 1px; border-color: #2a2f3a;
-                            name-input := TextInput { x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
+                            name-input := TextInput { text <=> root.profile-name; x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
                             if name-input.text == "": Text { x: 10px; text: "Profile name"; color: Theme.muted; vertical-alignment: center; font-size: 13px; } }
                         if has-curve: Pill { width: 190px; label: save-curves ? "With current fan curves" : "Without fan curves"; selected: save-curves; clicked => { save-curves = !save-curves; } }
                         Pill { width: 130px; label: "Save current"; selected: true; enabled: can-write && name-input.text != "";
-                            clicked => { save-profile(name-input.text, save-curves); name-input.text = ""; } } } }
+                            clicked => { save-profile(name-input.text, save-curves); } } } }
             } }
 
             if page == 2: Flickable { interactive: false; VerticalLayout {

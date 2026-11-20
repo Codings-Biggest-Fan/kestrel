@@ -395,7 +395,13 @@ fn save_profile(weak: Weak<AppWindow>, name: String, curves: bool) {
                 let mut list = profiles::load();
                 list.retain(|x| x.name != p.name);
                 list.push(p);
-                ui.set_message(profiles::save(&list).err().map(|e| e.to_string()).unwrap_or_default().into());
+                match profiles::save(&list) {
+                    Ok(()) => {
+                        ui.set_message(SharedString::new());
+                        ui.set_profile_name(SharedString::new());
+                    }
+                    Err(e) => ui.set_message(e.to_string().into()),
+                }
                 show_profiles(&ui);
             }
             Err(e) => ui.set_message(e.to_string().into()),
