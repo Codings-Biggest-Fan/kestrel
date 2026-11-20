@@ -186,6 +186,10 @@ export component AppWindow inherits Window {
     in property <int> lid-dc: -1;
     callback set-auto(int, int, bool);
     callback set-lid(bool, int);
+    in property <[string]> rules;
+    in-out property <int> rule-scn: 0;
+    callback add-rule(string, int);
+    callback remove-rule(int);
     in property <string> gpu-name;
     in property <string> gpu-driver;
     in property <string> gpu-stats;
@@ -420,6 +424,19 @@ export component AppWindow inherits Window {
                             clicked => { auto-60hz = !auto-60hz; set-auto(auto-bat, auto-ac, auto-60hz); } } }
                     Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
                         text: "Applied by the tray when you plug in or unplug, so keep kestrel-tray running. 60 Hz returns to the highest rate on AC."; } }
+                Card { title: "AUTO PROFILES";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "While a listed program runs, the tray switches to its scenario, then switches back when it closes."; }
+                    for r[i] in rules: HorizontalLayout { spacing: 10px; alignment: start;
+                        Text { text: r; color: Theme.text; vertical-alignment: center; min-width: 300px; }
+                        Pill { width: 90px; label: "Remove"; clicked => { remove-rule(i); } } }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Rectangle { width: 220px; height: 34px; border-radius: 8px; background: #0f1115; border-width: 1px; border-color: #2a2f3a;
+                            exe-input := TextInput { x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
+                            if exe-input.text == "": Text { x: 10px; text: "game.exe"; color: Theme.muted; vertical-alignment: center; font-size: 13px; } }
+                        for s[i] in scenarios: Pill { width: 100px; label: s.label; selected: rule-scn == i; clicked => { rule-scn = i; } }
+                        Pill { width: 80px; label: "Add"; selected: true; enabled: exe-input.text != "";
+                            clicked => { add-rule(exe-input.text, rule-scn); exe-input.text = ""; } } } }
                 Card { title: "WHEN I CLOSE THE LID";
                     Text { text: "On battery"; color: Theme.muted; font-size: 12px; }
                     HorizontalLayout { spacing: 8px; alignment: start;

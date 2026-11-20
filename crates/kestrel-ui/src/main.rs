@@ -1,7 +1,7 @@
 //! kestrel-ui: main window. Talks to kestrel-svc over IPC and exits when closed.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use kestrel_core::automation::Automation;
+use kestrel_core::automation::{AppRule, Automation};
 use kestrel_core::ipc::{Request, Response, Status};
 use kestrel_core::scenario::Scenario;
 use slint::{Model, ModelRc, SharedString, VecModel, Weak};
@@ -165,6 +165,11 @@ fn load_lights(weak: Weak<AppWindow>) {
     });
 }
 
+fn show_rules(ui: &AppWindow, rules: &[AppRule]) {
+    let items: Vec<SharedString> = rules.iter().map(|r| format!("{}  →  {}", r.exe, r.scenario.label()).into()).collect();
+    ui.set_rules(ModelRc::new(VecModel::from(items)));
+}
+
 fn load_lid(weak: Weak<AppWindow>) {
     std::thread::spawn(move || {
         let lid = kestrel_core::power::lid_actions();
@@ -270,7 +275,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let w = ui.as_weak();
     ui.on_set_auto(move |bat, ac, hz60| {
         let pick = |i: i32| usize::try_from(i).ok().and_then(Scenario::from_index);
-        let a = Automation { battery_scenario: pick(bat), ac_scenario: pick(ac), battery_60hz: hz60 };
+        let a = Automation { battery_scenario: pick(bat), ac_scenario: pick(ac), battery_60hz: hz60, ..Automation::load() };
         let msg: SharedString = a.save().err().map(|e| format!("Could not save automation: {e}")).unwrap_or_default().into();
         if let Some(ui) = w.upgrade() {
             ui.set_message(msg);
@@ -288,6 +293,34 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     });
     load_lid(ui.as_weak());
+    show_rules(&ui, &auto.app_rules);
+    let w = ui.as_weak();
+    ui.on_add_rule(move |exe, scenario| {
+        let Some(ui) = w.upgrade() else { return };
+        let exe = exe.trim().to_ascii_lowercase();
+        let exe = if exe.ends_with(".exe") { exe } else { format!("{exe}.exe") };
+        let Some(scenario) = usize::try_from(scenario).ok().and_then(Scenario::from_index) else { return };
+        if exe == ".exe" {
+            return;
+        }
+        let mut a = Automation::load();
+        a.app_rules.retain(|r| !r.exe.eq_ignore_ascii_case(&exe));
+        a.app_rules.push(AppRule { exe, scenario });
+        ui.set_message(a.save().err().map(|e| e.to_string()).unwrap_or_default().into());
+        show_rules(&ui, &a.app_rules);
+    });
+    let w = ui.as_weak();
+    ui.on_remove_rule(move |i| {
+        let Some(ui) = w.upgrade() else { return };
+        let mut a = Automation::load();
+        if let Ok(i) = usize::try_from(i) {
+            if i < a.app_rules.len() {
+                a.app_rules.remove(i);
+            }
+        }
+        ui.set_message(a.save().err().map(|e| e.to_string()).unwrap_or_default().into());
+        show_rules(&ui, &a.app_rules);
+    });
     let w = ui.as_weak();
     ui.on_load_gpu(move || load_gpu(w.clone()));
     ui.on_open_driver_page(|| {
