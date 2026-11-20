@@ -55,7 +55,7 @@ fn handle(mut stream: Stream, state: Shared) {
                 let r = crate::drivers::install(&ids);
                 eprintln!("InstallDriverUpdates {ids:?} -> {r:?}");
                 match r {
-                    Ok(reboot) => Response::Installed { reboot },
+                    Ok((reboot, failed)) => Response::Installed { reboot, failed },
                     Err(e) => Response::Error(e),
                 }
             }

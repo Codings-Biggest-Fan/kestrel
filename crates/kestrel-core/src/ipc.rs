@@ -39,7 +39,8 @@ pub enum Response {
     FanCurve { temps: Vec<u8>, speeds: Vec<u8> },
     Lighting(Vec<LightDevice>),
     Drivers(Vec<DriverUpdate>),
-    Installed { reboot: bool },
+    /// `failed`: Windows Update installed only some of them.
+    Installed { reboot: bool, failed: bool },
     Ok,
     Error(String),
 }

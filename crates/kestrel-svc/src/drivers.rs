@@ -47,8 +47,8 @@ mod imp {
         }
     }
 
-    /// Returns whether a reboot is needed.
-    pub fn install(ids: &[String]) -> Result<bool, String> {
+    /// Returns (reboot needed, some updates failed).
+    pub fn install(ids: &[String]) -> Result<(bool, bool), String> {
         unsafe {
             let (session, found) = search().map_err(e)?;
             let pick: IUpdateCollection = CoCreateInstance(&UpdateCollection, None, CLSCTX_INPROC_SERVER).map_err(e)?;
@@ -74,7 +74,7 @@ mod imp {
             if code != orcSucceeded && code != orcSucceededWithErrors {
                 return Err(format!("Windows Update could not install the drivers (result {}).", code.0));
             }
-            Ok(r.RebootRequired().map(|b| b.0 != 0).unwrap_or(false))
+            Ok((r.RebootRequired().map(|b| b.0 != 0).unwrap_or(false), code == orcSucceededWithErrors))
         }
     }
 }
@@ -92,8 +92,8 @@ mod imp {
         ])
     }
 
-    pub fn install(_ids: &[String]) -> Result<bool, String> {
-        Ok(false)
+    pub fn install(_ids: &[String]) -> Result<(bool, bool), String> {
+        Ok((false, false))
     }
 }
 

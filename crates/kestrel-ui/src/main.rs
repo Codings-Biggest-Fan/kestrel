@@ -200,10 +200,15 @@ fn driver_call(weak: Weak<AppWindow>, req: Request) {
                     ui.set_drivers(ModelRc::new(VecModel::from(titles.clone())));
                     if titles.is_empty() { "All drivers are up to date.".to_string() } else { format!("{} update(s) available.", titles.len()) }
                 }
-                Ok(Response::Installed { reboot }) => {
+                Ok(Response::Installed { reboot, failed }) => {
                     DRIVER_IDS.lock().unwrap_or_else(|p| p.into_inner()).clear();
                     ui.set_drivers(ModelRc::default());
-                    if reboot { "Installed. Restart Windows to finish.".into() } else { "Installed.".into() }
+                    let done = if failed {
+                        "Some drivers did not install. Click Check for updates to see which are left."
+                    } else {
+                        "Installed."
+                    };
+                    if reboot { format!("{done} Restart Windows to finish.") } else { done.to_string() }
                 }
                 Ok(Response::Error(e)) => e,
                 Ok(_) => "Unexpected reply from the service.".into(),
