@@ -3,7 +3,7 @@
 /// Labels in powercfg's value order: 0 do nothing, 1 sleep, 2 hibernate, 3 shut down.
 pub const LID_ACTIONS: [&str; 4] = ["Do nothing", "Sleep", "Hibernate", "Shut down"];
 
-/// Parses `powercfg /q SCHEME_CURRENT SUB_BUTTONS LIDACTION`. The labels are localized, so
+/// Parses `powercfg /qh SCHEME_CURRENT SUB_BUTTONS LIDACTION`. The labels are localized, so
 /// this takes the first two values written as `: 0x…` (AC, then DC).
 pub fn parse_lid(out: &str) -> Option<(u8, u8)> {
     let mut vals = out.lines().filter_map(|l| {
@@ -37,7 +37,8 @@ fn powercfg(_args: &[&str]) -> Result<String, String> {
 
 /// (plugged in, on battery)
 pub fn lid_actions() -> Result<(u8, u8), String> {
-    let out = powercfg(&["/q", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION"])?;
+    // `/qh` includes hidden settings; many laptops hide LIDACTION, and `/q` then prints nothing.
+    let out = powercfg(&["/qh", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION"])?;
     parse_lid(&out).ok_or_else(|| format!("unexpected powercfg output: {}", out.trim().lines().last().unwrap_or("(empty)")))
 }
 
