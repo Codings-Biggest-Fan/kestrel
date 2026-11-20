@@ -333,7 +333,7 @@ export component AppWindow inherits Window {
                 }
                 if supported && cpu-name != "": Card { title: "CPU POWER LIMITS · EXPERIMENTAL";
                     Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
-                        text: cpu-name + (cpu-note != "" ? " · " + cpu-note : "") + (cpu-ok ? " Sustained is the long-run package power, boost the short-burst limit. The laptop's own temperature limits still apply." : ""); }
+                        text: cpu-name + (cpu-note != "" ? " · " + cpu-note : "") + (cpu-ok ? ". Sustained is the long-run package power, boost the short-burst limit. The laptop's own temperature limits still apply." : ""); }
                     if cpu-ok: HorizontalLayout { spacing: 8px; alignment: start;
                         Text { text: "Sustained"; width: 80px; color: Theme.text; vertical-alignment: center; font-size: 13px; }
                         Pill { width: 44px; label: "−"; clicked => { cpu-sustained = max(5, cpu-sustained - 5); } }
