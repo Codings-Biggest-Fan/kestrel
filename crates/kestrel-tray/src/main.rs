@@ -219,7 +219,13 @@ mod win {
         let Ok(menu) = CreatePopupMenu() else { return };
         let (scenario, boost) = current().unwrap_or((None, None));
         let connected = boost.is_some() || scenario.is_some();
-        for s in Scenario::ALL {
+        let shown = kestrel_core::transport::client()
+            .and_then(|mut c| c.status())
+            .map(|s| s.caps.scenarios)
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| Scenario::ALL.to_vec());
+        for s in shown {
             let mut flags = MF_STRING;
             if Some(s) == scenario { flags |= MF_CHECKED; }
             let label: Vec<u16> = s.label().encode_utf16().chain(Some(0)).collect();

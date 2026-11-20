@@ -62,7 +62,10 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_firmware(s.model.firmware.clone().into());
     ui.set_read_only(s.model.read_only);
     ui.set_supported(s.model.map_id.is_some());
-    ui.set_scenario(s.scenario.map(|x| x.index() as i32).unwrap_or(-1));
+    if !s.caps.scenarios.is_empty() && *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) != s.caps.scenarios {
+        show_scenarios(ui, s.caps.scenarios.clone());
+    }
+    ui.set_scenario(shown_index(s.scenario));
     ui.set_cpu_temp(opt(s.cpu_temp, ""));
     ui.set_gpu_temp(opt(s.gpu_temp, ""));
     ui.set_cpu_temp_f(s.cpu_temp.unwrap_or(0) as f32 / 100.0);
@@ -275,16 +278,36 @@ fn monotonic(speeds: impl Iterator<Item = i32>) -> Vec<u8> {
         .collect()
 }
 
+/// Scenarios the UI lists; UI indices refer to this, not to `Scenario::ALL`.
+static SHOWN: std::sync::Mutex<Vec<Scenario>> = std::sync::Mutex::new(Vec::new());
+
+fn shown_index(s: Option<Scenario>) -> i32 {
+    let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner());
+    s.and_then(|s| shown.iter().position(|&x| x == s)).map_or(-1, |i| i as i32)
+}
+
+fn shown_at(i: i32) -> Option<Scenario> {
+    let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner());
+    usize::try_from(i).ok().and_then(|i| shown.get(i).copied())
+}
+
+fn show_scenarios(ui: &AppWindow, list: Vec<Scenario>) {
+    let items: Vec<ScenarioItem> = list.iter().map(|&s| ScenarioItem { label: s.label().into(), hint: hint(s).into() }).collect();
+    *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) = list;
+    ui.set_scenarios(ModelRc::new(VecModel::from(items)));
+    let auto = Automation::load();
+    ui.set_auto_bat(shown_index(auto.battery_scenario));
+    ui.set_auto_ac(shown_index(auto.ac_scenario));
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
-    let items: Vec<ScenarioItem> =
-        Scenario::ALL.iter().map(|&s| ScenarioItem { label: s.label().into(), hint: hint(s).into() }).collect();
-    ui.set_scenarios(ModelRc::new(VecModel::from(items)));
+    show_scenarios(&ui, Scenario::ALL.to_vec());
     ui.set_track(arc(1.0));
 
     let w = ui.as_weak();
     ui.on_set_scenario(move |i| {
-        if let Some(s) = Scenario::from_index(i as usize) {
+        if let Some(s) = shown_at(i) {
             send(w.clone(), Request::SetScenario(s));
         }
     });
@@ -306,14 +329,10 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     load_lights(ui.as_weak());
     let auto = Automation::load();
-    let idx = |s: Option<Scenario>| s.map_or(-1, |s| s.index() as i32);
-    ui.set_auto_bat(idx(auto.battery_scenario));
-    ui.set_auto_ac(idx(auto.ac_scenario));
     ui.set_auto_60hz(auto.battery_60hz);
     let w = ui.as_weak();
     ui.on_set_auto(move |bat, ac, hz60| {
-        let pick = |i: i32| usize::try_from(i).ok().and_then(Scenario::from_index);
-        let a = Automation { battery_scenario: pick(bat), ac_scenario: pick(ac), battery_60hz: hz60, ..Automation::load() };
+        let a = Automation { battery_scenario: shown_at(bat), ac_scenario: shown_at(ac), battery_60hz: hz60, ..Automation::load() };
         let msg: SharedString = a.save().err().map(|e| format!("Could not save automation: {e}")).unwrap_or_default().into();
         if let Some(ui) = w.upgrade() {
             ui.set_message(msg);
@@ -337,7 +356,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let Some(ui) = w.upgrade() else { return };
         let exe = exe.trim().to_ascii_lowercase();
         let exe = if exe.ends_with(".exe") { exe } else { format!("{exe}.exe") };
-        let Some(scenario) = usize::try_from(scenario).ok().and_then(Scenario::from_index) else { return };
+        let Some(scenario) = shown_at(scenario) else { return };
         if exe == ".exe" {
             return;
         }

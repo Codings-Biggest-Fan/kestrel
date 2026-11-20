@@ -83,6 +83,9 @@ pub struct Capabilities {
     pub shift_modes: Vec<String>,
     #[serde(default)]
     pub fan_curve: bool,
+    /// Scenarios to offer, in `Scenario::ALL` order.
+    #[serde(default)]
+    pub scenarios: Vec<Scenario>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

@@ -211,6 +211,8 @@ mod tests {
         assert!(m.conf.super_battery.is_none());
         assert_eq!(m.conf.fan_curve.unwrap().cpu_speed_base, 0x72);
         assert!(m.conf.fan_curve.unwrap().requires_extreme);
+        use crate::scenario::Scenario;
+        assert_eq!(Scenario::available(&m.conf), vec![Scenario::Extreme, Scenario::Balanced, Scenario::Silent]);
         assert_eq!(m.conf.fan_rpm.unwrap().cpu_address, Some(0xc8));
     }
 
