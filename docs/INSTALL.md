@@ -9,6 +9,16 @@ Kestrel is early software. These builds are **not code-signed**, so Windows warn
 3. Right-click the zip → **Extract All…** → **Extract**. You get a `Kestrel` folder holding
    `kestrel-svc.exe`, `kestrel-ui.exe` and `kestrel-tray.exe`.
 
+## Quick start
+
+1. Close MSI Center (see step 2).
+2. Double-click **`Start Kestrel.cmd`** in the extracted folder and click **Yes** when Windows asks for
+   administrator rights. If SmartScreen appears: **More info** → **Run anyway**.
+3. A console window titled *Kestrel service* opens (it prints every change; close it to stop Kestrel),
+   then the tray icon and the main window.
+
+Steps 3–6 below do the same thing by hand.
+
 ## 2. Close MSI Center
 
 Two programs writing to the embedded controller (EC) at the same time can interfere with each other.
