@@ -333,8 +333,28 @@ impl Laptop for Gigabyte {
                 ignored.push(format!("fan_point_{i}"));
             }
         }
-        for (setter, get) in SETTERS.iter().rev() {
-            if let Some((_, v)) = entries.iter().find(|(k, _)| k == get) {
+        // Charge settings, then mode flags: clear Fixed before Step, enable Step before Fixed.
+        let value = |g: &str| entries.iter().find(|(k, _)| k == g).map(|e| e.1);
+        let clear = [
+            "GetNvThermalTarget",
+            "GetFanFixedStatus",
+            "GetStepFanStatus",
+            "GetAutoFanStatus",
+        ];
+        let order = ["GetChargeStop", "GetChargePolicy"]
+            .into_iter()
+            .chain(clear.into_iter().filter(|g| value(g) == Some(0)))
+            .chain(
+                clear
+                    .into_iter()
+                    .rev()
+                    .filter(|g| value(g).is_some_and(|v| v != 0)),
+            );
+        let restores: Vec<(&str, &str)> = order
+            .filter_map(|g| SETTERS.iter().find(|e| e.1 == g).copied())
+            .collect();
+        for (setter, get) in restores {
+            if let Some(v) = value(get).as_ref() {
                 self.io.set(setter, *v as u8)?;
                 if self.io.get(get)? != *v {
                     ignored.push(get.to_string());
