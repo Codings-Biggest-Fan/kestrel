@@ -221,6 +221,7 @@ mod win {
             return false;
         }
         let current = current().and_then(|(s, _)| s);
+        let mut switched = true;
         match want {
             Some(s) => {
                 if st.active.is_none() {
@@ -236,12 +237,14 @@ mod win {
                     if !set_scenario(app, b) {
                         return false;
                     }
+                } else {
+                    switched = false;
                 }
                 st.before = None;
             }
         }
         st.active = want;
-        true
+        switched
     }
 
     fn running_exes() -> Vec<String> {
