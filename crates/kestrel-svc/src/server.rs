@@ -63,7 +63,24 @@ fn result(r: Result<(), String>) -> Response {
     }
 }
 
+/// Every hardware-changing request is logged with its result and the control registers
+/// afterwards, so a console run on a real laptop shows exactly what the EC accepted.
 pub fn dispatch(st: &mut State, req: Request) -> Response {
+    if matches!(req, Request::GetStatus | Request::Hello { .. } | Request::GetFanCurve { .. }) {
+        return dispatch_inner(st, req);
+    }
+    let desc = format!("{req:?}");
+    let resp = dispatch_inner(st, req);
+    let regs = st.ec.as_mut().map(|ec| {
+        let c = ec.conf().clone();
+        let addrs = [c.cooler_boost.and_then(|f| f.address), c.shift_mode.and_then(|m| m.address), c.fan_mode.and_then(|m| m.address)];
+        addrs.into_iter().flatten().map(|a| format!("0x{a:02x}={}", ec.peek(a).map_or("??".into(), |v| format!("0x{v:02x}")))).collect::<Vec<_>>().join(" ")
+    });
+    eprintln!("{desc} -> {resp:?} | {}", regs.unwrap_or_default());
+    resp
+}
+
+fn dispatch_inner(st: &mut State, req: Request) -> Response {
     match req {
         Request::Hello { .. } => Response::Hello { protocol: PROTOCOL_VERSION, version: kestrel_core::VERSION.into() },
         Request::GetStatus => Response::Status(Box::new(status(st))),

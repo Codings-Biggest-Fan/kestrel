@@ -35,7 +35,7 @@ impl Scenario {
         match self {
             Scenario::Extreme => &["turbo", "sport"],
             Scenario::Balanced => &["comfort", "sport"],
-            Scenario::Silent => &["eco", "comfort"],
+            Scenario::Silent => &["comfort", "eco"],
             Scenario::SuperBattery => &["eco"],
         }
     }

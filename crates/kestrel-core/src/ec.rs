@@ -93,6 +93,11 @@ impl MsiEc {
         &self.conf
     }
 
+    /// Raw read for diagnostics.
+    pub fn peek(&mut self, addr: u8) -> Result<u8> {
+        self.io.read(addr)
+    }
+
     pub fn read_only(&self) -> bool {
         self.read_only
     }
