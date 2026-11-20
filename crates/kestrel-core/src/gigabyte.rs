@@ -296,7 +296,12 @@ impl Laptop for Gigabyte {
                 }));
             }
         }
-        self.set_fan_mode(FanMode::Custom)?;
+        if let Err(e) = self.set_fan_mode(FanMode::Custom) {
+            for (i, &(t, d)) in current.iter().enumerate() {
+                let _ = self.io.set_fan_point(i as u8, t, d);
+            }
+            return Err(e);
+        }
         Ok(None)
     }
 
