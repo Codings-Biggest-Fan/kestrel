@@ -320,7 +320,7 @@ export component AppWindow inherits Window {
                 Rectangle {}
             }
 
-            if page == 2: Flickable { VerticalLayout {
+            if page == 2: Flickable { interactive: false; VerticalLayout {
                 spacing: 16px;
                 HorizontalLayout { spacing: 16px;
                     Gauge { title: "CPU FAN"; arc: cpu-arc; track: track; fill: cpu-temp-f; value: cpu-temp; unit: cpu-fan; sub: "CPU °C"; }
