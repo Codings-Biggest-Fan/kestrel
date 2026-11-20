@@ -553,6 +553,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let w = w.clone();
         std::thread::spawn(move || {
             let r = kestrel_core::transport::client().and_then(|mut c| profiles::requests(&p).iter().try_for_each(|req| c.command(req)));
+            if r.is_ok() && p.cpu_power.is_some() {
+                *LAST_CPU.lock().unwrap_or_else(|p| p.into_inner()) = p.cpu_power;
+            }
             let msg: SharedString = r.err().map(|e| format!("{}: {e}", p.name)).unwrap_or_default().into();
             let gpu = w.upgrade().is_some_and(|ui| ui.get_curve_gpu());
             let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
