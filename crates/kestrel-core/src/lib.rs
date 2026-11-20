@@ -3,6 +3,7 @@
 pub mod automation;
 pub mod ec;
 pub mod fan;
+pub mod gpu;
 pub mod ipc;
 pub mod journal;
 pub mod model;
