@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/kestrel-core", "crates/kestrel-svc"]
+members = ["crates/kestrel-core", "crates/kestrel-svc", "crates/kestrel-tray"]
 
 [workspace.package]
 version = "0.1.0"
