@@ -375,14 +375,16 @@ fn save_profile(weak: Weak<AppWindow>, name: String, curves: bool) {
         let r = (|| -> std::io::Result<Profile> {
             let mut c = kestrel_core::transport::client()?;
             let st = c.status()?;
-            let curve = |c: &mut kestrel_core::ipc::Client<kestrel_core::transport::Stream>, gpu| match c.call(&Request::GetFanCurve { gpu }) {
-                Ok(Response::FanCurve { speeds, .. }) => Some(speeds),
-                _ => None,
+            let scenario = st.scenario.ok_or_else(|| std::io::Error::other("Choose a scenario first, then save the profile."))?;
+            let curve = |c: &mut kestrel_core::ipc::Client<kestrel_core::transport::Stream>, gpu| match c.call(&Request::GetFanCurve { gpu })? {
+                Response::FanCurve { speeds, .. } => Ok(Some(speeds)),
+                Response::Error(e) => Err(std::io::Error::other(e)),
+                other => Err(std::io::Error::other(format!("unexpected reply: {other:?}"))),
             };
-            let (cpu_curve, gpu_curve) = if curves && st.caps.fan_curve { (curve(&mut c, false), curve(&mut c, true)) } else { (None, None) };
+            let (cpu_curve, gpu_curve) = if curves && st.caps.fan_curve { (curve(&mut c, false)?, curve(&mut c, true)?) } else { (None, None) };
             Ok(Profile {
                 name,
-                scenario: st.scenario.unwrap_or(Scenario::Balanced),
+                scenario,
                 cooler_boost: st.cooler_boost.unwrap_or(false),
                 cpu_curve,
                 gpu_curve,
