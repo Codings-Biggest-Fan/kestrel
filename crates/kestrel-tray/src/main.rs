@@ -132,7 +132,10 @@ mod win {
                     }
                 }
             }
-            apply_schedule(&mut sched, &mut app);
+            // Low battery outranks the schedule: re-apply it after any schedule switch.
+            if apply_schedule(&mut sched, &mut app) {
+                low = None;
+            }
             if let Some(ac) = now {
                 let auto = Automation::load();
                 match auto.low_battery_scenario(ac, battery_pct()) {
@@ -202,14 +205,14 @@ mod win {
 
     /// Switches when a schedule window starts. When it ends, the earlier scenario comes back,
     /// unless something else changed the scenario in the meantime.
-    fn apply_schedule(st: &mut AppState, app: &mut AppState) {
+    fn apply_schedule(st: &mut AppState, app: &mut AppState) -> bool {
         let auto = Automation::load();
         if auto.schedule.is_empty() && st.active.is_none() {
-            return;
+            return false;
         }
         let want = auto.scheduled(local_minute());
         if want == st.active {
-            return;
+            return false;
         }
         let current = current().and_then(|(s, _)| s);
         match want {
@@ -218,20 +221,21 @@ mod win {
                     st.before = if app.active.is_some() { app.before } else { current };
                 }
                 if !set_scenario(app, s) {
-                    return;
+                    return false;
                 }
             }
             None => {
                 let ours = if app.active.is_some() { app.before == st.active } else { current == st.active };
                 if let (Some(b), true) = (st.before, ours) {
                     if !set_scenario(app, b) {
-                        return;
+                        return false;
                     }
                 }
                 st.before = None;
             }
         }
         st.active = want;
+        true
     }
 
     fn running_exes() -> Vec<String> {
