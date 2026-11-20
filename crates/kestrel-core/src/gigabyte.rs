@@ -63,11 +63,11 @@ impl FanMode {
             FanMode::Custom => (0, 0, 1, 0),
             FanMode::Fixed => (0, 1, 1, 0),
         };
-        // Clear the modes being left before setting the new one, as the firmware expects.
+        // Set in this order (Fixed needs Step first); cleared in reverse (Fixed before Step).
         [
             ("SetAutoFanStatus", auto),
-            ("SetFixedFanStatus", fixed),
             ("SetStepFanStatus", step),
+            ("SetFixedFanStatus", fixed),
             ("SetNvThermalTarget", nv),
         ]
     }
@@ -128,10 +128,16 @@ impl Gigabyte {
         if self.read_only {
             return Err(EcError::ReadOnly);
         }
+        if mode == FanMode::Quiet && !self.has_nv_target {
+            return Err(EcError::Unsupported(
+                "Quiet fan mode (no GetNvThermalTarget)",
+            ));
+        }
         let flags = mode.flags();
         // Clear flags first so the firmware never sees two modes at once.
         for (setter, v) in flags
             .iter()
+            .rev()
             .filter(|(_, v)| *v == 0)
             .chain(flags.iter().filter(|(_, v)| *v != 0))
         {
@@ -290,11 +296,19 @@ impl Laptop for Gigabyte {
                 }));
             }
         }
-        self.set_fan_mode(FanMode::Custom)?;
+        if let Err(e) = self.set_fan_mode(FanMode::Custom) {
+            for (i, &(t, d)) in current.iter().enumerate() {
+                let _ = self.io.set_fan_point(i as u8, t, d);
+            }
+            return Err(e);
+        }
         Ok(None)
     }
 
     fn restore(&mut self) -> Result<usize> {
+        if self.read_only {
+            return Err(EcError::ReadOnly);
+        }
         let entries: Vec<(String, u32)> = self
             .journal
             .named_entries()
@@ -311,13 +325,27 @@ impl Laptop for Gigabyte {
                 points.insert(i, *v);
             }
         }
-        for (i, v) in points {
-            self.io.set_fan_point(i, (v >> 8) as u8, v as u8)?;
+        let mut ignored = Vec::new();
+        for (&i, &v) in &points {
+            let want = ((v >> 8) as u8, v as u8);
+            self.io.set_fan_point(i, want.0, want.1)?;
+            if self.io.fan_point(i)? != want {
+                ignored.push(format!("fan_point_{i}"));
+            }
         }
         for (setter, get) in SETTERS.iter().rev() {
             if let Some((_, v)) = entries.iter().find(|(k, _)| k == get) {
                 self.io.set(setter, *v as u8)?;
+                if self.io.get(get)? != *v {
+                    ignored.push(get.to_string());
+                }
             }
+        }
+        // Keep the journal so a retry still has the originals.
+        if !ignored.is_empty() {
+            return Err(EcError::Io(format!(
+                "firmware did not take back {ignored:?}; journal kept"
+            )));
         }
         self.journal.clear();
         Ok(entries.len())

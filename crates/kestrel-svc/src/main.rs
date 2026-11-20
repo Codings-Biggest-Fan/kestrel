@@ -146,7 +146,7 @@ fn open_audio(mock: bool) -> Option<SoundBlaster> {
 fn init(mock_fw: Option<String>) -> State {
     let settings = settings::Settings::load();
     if let Some((io, ident)) = open_gigabyte(mock_fw.as_deref()) {
-        return init_gigabyte(&settings, io, ident);
+        return init_gigabyte(&settings, io, ident, mock_fw.is_some());
     }
     let mut model = ModelInfo {
         read_only: true,
@@ -224,6 +224,7 @@ fn init_gigabyte(
     settings: &settings::Settings,
     io: Box<dyn GbIo>,
     (name, sku): (String, String),
+    mock: bool,
 ) -> State {
     // No GIGABYTE model is confirmed on owner hardware yet: read-only until opted in.
     let key = format!("GIGABYTE:{sku}");
@@ -235,8 +236,12 @@ fn init_gigabyte(
         wmi: None,
         read_only: !allowed,
     };
-    let journal =
-        Journal::open(settings::data_dir().join("journal-gigabyte.json")).unwrap_or_default();
+    // A mock must never leave simulated values in the real hardware journal.
+    let journal = if mock {
+        Journal::in_memory()
+    } else {
+        Journal::open(settings::data_dir().join("journal-gigabyte.json")).unwrap_or_default()
+    };
     let ec: Box<dyn Laptop> = Box::new(Gigabyte::new(io, journal, !allowed));
     State {
         ec: Some(ec),
