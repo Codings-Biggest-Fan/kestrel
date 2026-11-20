@@ -77,6 +77,18 @@ pub fn dispatch(st: &mut State, req: Request) -> Response {
         Request::SetCoolerBoost(on) => result(with_ec(st, |ec| ec.set_cooler_boost(on))),
         Request::SetChargeLimit(p) => result(with_ec(st, |ec| ec.set_charge_limit(p))),
         Request::SetKbdBacklight(l) => result(with_ec(st, |ec| ec.set_kbd_backlight(l))),
+        Request::GetFanCurve { gpu } => match st.ec.as_mut().map(|ec| ec.fan_curve(gpu)) {
+            Some(Ok((temps, speeds))) => Response::FanCurve { temps, speeds },
+            Some(Err(e)) => Response::Error(e.to_string()),
+            None => Response::Error("no supported EC on this laptop".into()),
+        },
+        Request::SetFanCurve { gpu, speeds } => result(with_ec(st, |ec| {
+            ec.set_fan_curve_speeds(gpu, &speeds)?;
+            if ec.conf().fan_mode.as_ref().is_some_and(|m| m.modes.contains_key("advanced")) {
+                ec.set_fan_mode("advanced")?;
+            }
+            Ok(())
+        })),
         Request::RestoreDefaults => {
             st.scenario = None;
             result(with_ec(st, |ec| ec.restore().map(|_| ())))
@@ -126,6 +138,7 @@ fn status(st: &mut State) -> Status {
             kbd_backlight: c.kbd_bl.as_ref().and_then(|k| k.bl_state_address).is_some(),
             super_battery: c.super_battery.and_then(|f| f.address).is_some(),
             shift_modes: c.shift_mode.as_ref().map(|m| m.modes.keys().cloned().collect()).unwrap_or_default(),
+            fan_curve: c.fan_curve.is_some(),
         };
         s.cooler_boost = ec.cooler_boost().ok();
         s.charge_limit = ec.charge_limit().ok().flatten();
