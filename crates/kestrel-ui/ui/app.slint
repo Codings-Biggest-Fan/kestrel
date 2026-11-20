@@ -204,6 +204,9 @@ export component AppWindow inherits Window {
     in-out property <int> auto-bat: -1;
     in-out property <int> auto-ac: -1;
     in-out property <bool> auto-60hz;
+    in-out property <int> auto-low-pct;
+    in-out property <int> auto-low-scn: -1;
+    callback set-low-battery(int, int);
     in property <int> lid-ac: -1;
     in property <string> lid-error;
     in property <int> lid-dc: -1;
@@ -527,8 +530,16 @@ export component AppWindow inherits Window {
                     HorizontalLayout { spacing: 8px; alignment: start;
                         Pill { width: 230px; label: auto-60hz ? "60 Hz on battery: on" : "60 Hz on battery: off"; selected: auto-60hz;
                             clicked => { auto-60hz = !auto-60hz; set-auto(auto-bat, auto-ac, auto-60hz); } } }
+                    Text { text: "Low battery"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 80px; label: "Off"; selected: auto-low-pct == 0; clicked => { auto-low-pct = 0; set-low-battery(auto-low-pct, auto-low-scn); } }
+                        for p in [10, 20, 30, 40]: Pill { width: 80px; label: "≤ " + p + " %"; selected: auto-low-pct == p; enabled: supported && !read-only;
+                            clicked => { auto-low-pct = p; set-low-battery(auto-low-pct, auto-low-scn); } } }
+                    if auto-low-pct > 0: HorizontalLayout { spacing: 8px; alignment: start;
+                        for s[i] in scenarios: Pill { width: 110px; label: s.label; selected: auto-low-scn == i; enabled: supported && !read-only;
+                            clicked => { auto-low-scn = i; set-low-battery(auto-low-pct, auto-low-scn); } } }
                     Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
-                        text: "Applied by the tray when you plug in or unplug, so keep kestrel-tray running. 60 Hz returns to the highest rate on AC."; } }
+                        text: "Applied by the tray when you plug in or unplug, so keep kestrel-tray running. 60 Hz returns to the highest rate on AC. The low-battery scenario replaces the battery one until you plug in."; } }
                 Card { title: "AUTO PROFILES";
                     Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
                         text: "While a listed program runs, the tray switches to its scenario, then switches back when it closes."; }
