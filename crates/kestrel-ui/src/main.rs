@@ -47,10 +47,15 @@ fn spark(q: &VecDeque<f32>) -> SharedString {
 }
 
 fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32>) {
+    if !ui.get_connected() {
+        // Errors from while the service was down no longer apply.
+        ui.set_message(SharedString::new());
+    }
     ui.set_connected(true);
     ui.set_model_name(if s.model.name.is_empty() { "MSI laptop".into() } else { s.model.name.clone().into() });
     ui.set_firmware(s.model.firmware.clone().into());
     ui.set_read_only(s.model.read_only);
+    ui.set_supported(s.model.map_id.is_some());
     ui.set_scenario(s.scenario.map(|x| x.index() as i32).unwrap_or(-1));
     ui.set_cpu_temp(opt(s.cpu_temp, ""));
     ui.set_gpu_temp(opt(s.gpu_temp, ""));
@@ -86,7 +91,9 @@ fn poll(weak: Weak<AppWindow>) {
             client = None;
         }
         if let Some(s) = &status {
-            for (q, v) in [(&mut temps, s.cpu_temp.unwrap_or(0) as f32 / 100.0), (&mut loads, s.cpu_load_pct / 100.0)] {
+            // A missing reading is skipped, not plotted as 0 °C.
+            for (q, v) in [(&mut temps, s.cpu_temp.map(|t| t as f32 / 100.0)), (&mut loads, Some(s.cpu_load_pct / 100.0))] {
+                let Some(v) = v else { continue };
                 if q.len() == HISTORY {
                     q.pop_front();
                 }
