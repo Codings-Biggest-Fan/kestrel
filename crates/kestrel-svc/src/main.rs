@@ -7,6 +7,8 @@
 //!   kestrel-svc --mock gigabyte    foreground with an in-memory GIGABYTE WMI interface
 //!   kestrel-svc install|uninstall  register / remove the Windows service
 
+mod drivers;
+mod lighting;
 mod server;
 #[cfg(windows)]
 mod service;

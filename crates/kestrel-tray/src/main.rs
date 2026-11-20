@@ -2,6 +2,8 @@
 //! so it idles at a few MB. Left click opens the main window (kestrel-ui).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg(windows)]
+use kestrel_core::automation::Automation;
 use kestrel_core::ipc::Request;
 use kestrel_core::scenario::Scenario;
 
@@ -101,12 +103,165 @@ mod win {
             let tip: Vec<u16> = "Kestrel".encode_utf16().collect();
             nid.szTip[..tip.len()].copy_from_slice(&tip);
             let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+            std::thread::Builder::new()
+                .name("power".into())
+                .stack_size(128 * 1024)
+                .spawn(power_watch)
+                .ok();
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
             let _ = Shell_NotifyIconW(NIM_DELETE, &icon_data(hwnd));
+        }
+    }
+
+    fn on_ac() -> Option<bool> {
+        use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+        let mut s = SYSTEM_POWER_STATUS::default();
+        unsafe { GetSystemPowerStatus(&mut s) }.ok()?;
+        match s.ACLineStatus {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        }
+    }
+
+    /// Applies the user's power automation on every battery/AC transition.
+    fn power_watch() {
+        // `None` first, so the settings for the current power source apply when the tray starts.
+        let mut last: Option<bool> = None;
+        let mut app = AppState::default();
+        loop {
+            let now = on_ac();
+            if let Some(ac) = now {
+                if last != Some(ac) {
+                    let a = Automation::load().on_power_change(ac);
+                    // Retried next poll if the service is not up yet (it starts alongside the tray).
+                    let sent = a
+                        .scenario
+                        .is_none_or(|s| send(Request::SetScenario(s)).is_ok());
+                    if let Some(r) = a.refresh {
+                        let _ = display::set(r);
+                    }
+                    if sent {
+                        last = Some(ac);
+                    }
+                }
+            }
+            apply_app_rules(&mut app);
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
+    }
+
+    /// Auto engine state: the rule scenario in force and the scenario to return to afterwards.
+    #[derive(Default)]
+    struct AppState {
+        active: Option<Scenario>,
+        before: Option<Scenario>,
+    }
+
+    fn apply_app_rules(st: &mut AppState) {
+        let auto = Automation::load();
+        if auto.app_rules.is_empty() && st.active.is_none() {
+            return;
+        }
+        let want = auto.app_scenario(&running_exes());
+        if want == st.active {
+            return;
+        }
+        if st.active.is_none() {
+            st.before = current().and_then(|(s, _)| s);
+        }
+        match want.or(st.before) {
+            Some(s) if send(Request::SetScenario(s)).is_ok() => st.active = want,
+            None => st.active = None,
+            _ => {}
+        }
+        if st.active.is_none() {
+            st.before = None;
+        }
+    }
+
+    fn running_exes() -> Vec<String> {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Diagnostics::ToolHelp::*;
+        let mut out = Vec::new();
+        unsafe {
+            let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+                return out;
+            };
+            let mut e = PROCESSENTRY32W {
+                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                ..Default::default()
+            };
+            let mut ok = Process32FirstW(snap, &mut e).is_ok();
+            while ok {
+                let len = e
+                    .szExeFile
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(e.szExeFile.len());
+                out.push(String::from_utf16_lossy(&e.szExeFile[..len]).to_ascii_lowercase());
+                ok = Process32NextW(snap, &mut e).is_ok();
+            }
+            let _ = CloseHandle(snap);
+        }
+        out
+    }
+
+    mod display {
+        use kestrel_core::automation::{pick_refresh, Refresh};
+        use windows::core::PCWSTR;
+        use windows::Win32::Graphics::Gdi::*;
+
+        fn mode() -> DEVMODEW {
+            DEVMODEW {
+                dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+                ..Default::default()
+            }
+        }
+
+        /// Changes the primary display's refresh rate, keeping its resolution and colour depth.
+        pub fn set(want: Refresh) -> Result<u32, String> {
+            unsafe {
+                let mut cur = mode();
+                if !EnumDisplaySettingsW(PCWSTR::null(), ENUM_CURRENT_SETTINGS, &mut cur).as_bool()
+                {
+                    return Err("cannot read the display mode".into());
+                }
+                let mut rates = Vec::new();
+                let mut m = mode();
+                let mut i = 0;
+                while EnumDisplaySettingsW(PCWSTR::null(), ENUM_DISPLAY_SETTINGS_MODE(i), &mut m)
+                    .as_bool()
+                {
+                    if (m.dmPelsWidth, m.dmPelsHeight, m.dmBitsPerPel)
+                        == (cur.dmPelsWidth, cur.dmPelsHeight, cur.dmBitsPerPel)
+                    {
+                        rates.push(m.dmDisplayFrequency);
+                    }
+                    i += 1;
+                }
+                let hz = pick_refresh(&rates, want).ok_or("no matching refresh rate")?;
+                if hz == cur.dmDisplayFrequency {
+                    return Ok(hz);
+                }
+                cur.dmDisplayFrequency = hz;
+                cur.dmFields = DM_DISPLAYFREQUENCY;
+                let r = ChangeDisplaySettingsExW(
+                    PCWSTR::null(),
+                    Some(&cur),
+                    None,
+                    CDS_UPDATEREGISTRY,
+                    None,
+                );
+                if r != DISP_CHANGE_SUCCESSFUL {
+                    return Err(format!("ChangeDisplaySettingsEx failed ({})", r.0));
+                }
+                Ok(hz)
+            }
         }
     }
 

@@ -122,6 +122,7 @@ component Unsupported inherits Card {
 }
 
 export struct ScenarioItem { label: string, hint: string }
+export struct LightItem { id: string, name: string, kind: string, supported: bool }
 
 export component AppWindow inherits Window {
     title: "Kestrel";
@@ -172,6 +173,36 @@ export component AppWindow inherits Window {
     callback set-boost(bool);
     callback set-charge(int);
     callback set-kbd(int);
+    in property <[LightItem]> lights;
+    in property <[color]> swatches;
+    in-out property <int> light-sel: 0;
+    in-out property <int> light-swatch: 0;
+    in-out property <int> light-bright: 100;
+    callback load-lights();
+    in-out property <int> auto-bat: -1;
+    in-out property <int> auto-ac: -1;
+    in-out property <bool> auto-60hz;
+    in property <int> lid-ac: -1;
+    in property <string> lid-error;
+    in property <int> lid-dc: -1;
+    callback set-auto(int, int, bool);
+    callback set-lid(bool, int);
+    in property <[string]> rules;
+    in-out property <int> rule-scn: 0;
+    callback add-rule(string, int);
+    callback remove-rule(int);
+    in property <string> gpu-name;
+    in property <string> gpu-driver;
+    in property <string> gpu-stats;
+    in property <string> gpu-error;
+    callback load-gpu();
+    in property <[string]> drivers;
+    in property <string> driver-status: "Not checked yet.";
+    in property <bool> driver-busy;
+    callback check-drivers();
+    callback install-drivers();
+    callback open-driver-page();
+    callback set-light(string, int, int);
     callback restore();
     in property <bool> has-curve;
     in-out property <bool> curve-gpu;
@@ -182,8 +213,8 @@ export component AppWindow inherits Window {
     callback apply-curve(bool, [int]);
 
     property <int> page: 0;
-    property <[string]> pages: ["Dashboard", "Scenarios", "Fans", "Battery", "Lighting", "Settings"];
-    property <[string]> subtitles: ["Live temperatures, fans and load", "Power and fan profiles", "Cooling and Cooler Boost", "Charging and power source", "Keyboard and RGB devices", "Model, firmware and safety"];
+    property <[string]> pages: ["Dashboard", "Scenarios", "Fans", "Battery", "Lighting", "Drivers", "Settings"];
+    property <[string]> subtitles: ["Live temperatures, fans and load", "Power and fan profiles", "Cooling and Cooler Boost", "Charging and power source", "Keyboard and RGB devices", "GPU status and driver updates", "Model, firmware and safety"];
     // Lucide-style 24x24 outline icons.
     property <[string]> icons: [
         "M3 13h8V3H3zM13 21h8V11h-8zM13 3v6h8V3zM3 21h8v-6H3z",
@@ -191,6 +222,7 @@ export component AppWindow inherits Window {
         "M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M12 10c0-4 1-7 4-7s3 4-2 7M14 12c4 0 7 1 7 4s-4 3-7-2M12 14c0 4-1 7-4 7s-3-4 2-7M10 12c-4 0-7-1-7-4s4-3 7 2",
         "M3 7h15a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM22 11v2M6 10v4M10 10v4",
         "M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M7 14h10",
+        "M4 7h16v10H4zM8 7V4M12 7V4M16 7V4M8 20v-3M12 20v-3M16 20v-3M8 10h8v4H8z",
         "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
     ];
 
@@ -339,11 +371,51 @@ export component AppWindow inherits Window {
                     HorizontalLayout { spacing: 8px; alignment: start;
                         for v in kbd-max + 1: Pill { width: 72px; label: v == 0 ? "Off" : v; selected: kbd-level == v; enabled: has-kbd && can-write; clicked => { set-kbd(v); } } }
                     if !has-kbd: Text { text: "This model's backlight is not controlled through the EC."; color: Theme.muted; font-size: 12px; } }
-                Card { title: "RGB DEVICES"; Text { text: "Mouse and keyboard RGB arrive in M4."; color: Theme.muted; } }
+                Card { title: "RGB DEVICES";
+                    if lights.length == 0: Text { text: connected ? "No MSI or SteelSeries RGB devices found." : "Service offline."; color: Theme.muted; font-size: 12px; }
+                    for d[i] in lights: HorizontalLayout { spacing: 10px; alignment: start;
+                        Pill { width: 260px; label: d.name; selected: light-sel == i; enabled: d.supported; clicked => { light-sel = i; } }
+                        Text { vertical-alignment: center; color: Theme.muted; font-size: 12px;
+                            text: d.supported ? d.kind + "  " + d.id : "Not supported yet. Report " + d.id + " on GitHub."; } }
+                    if lights.length > 0 && lights[light-sel].supported: VerticalLayout { spacing: 12px;
+                        HorizontalLayout { spacing: 8px; alignment: start;
+                            for c[i] in swatches: Rectangle { width: 32px; height: 32px; border-radius: 16px; background: c;
+                                border-width: light-swatch == i ? 3px : 0px; border-color: Theme.text;
+                                TouchArea { clicked => { light-swatch = i; } } } }
+                        HorizontalLayout { spacing: 8px; alignment: start;
+                            for v in [0, 25, 50, 75, 100]: Pill { width: 64px; label: v == 0 ? "Off" : v + "%"; selected: light-bright == v; clicked => { light-bright = v; } } }
+                        HorizontalLayout { spacing: 8px; alignment: start;
+                            Pill { width: 120px; label: "Apply"; selected: true; enabled: connected; clicked => { set-light(lights[light-sel].id, light-swatch, light-bright); } } } }
+                    HorizontalLayout { alignment: start; Pill { width: 120px; label: "Rescan"; clicked => { load-lights(); } } } }
                 Rectangle {}
             }
 
             if page == 5: VerticalLayout {
+                spacing: 16px;
+                Timer { interval: 2s; running: page == 5; triggered => { load-gpu(); } }
+                Card { title: "GRAPHICS";
+                    if gpu-name == "": Text { text: gpu-error == "" ? "Reading GPU…" : gpu-error; color: Theme.muted; }
+                    if gpu-name != "": VerticalLayout { spacing: 6px;
+                        Text { text: gpu-name; color: Theme.text; font-size: 16px; font-weight: 600; }
+                        Text { text: gpu-stats; color: Theme.muted; font-size: 13px; } } }
+                Card { title: "DRIVER UPDATES";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "From Windows Update: Wi-Fi, Bluetooth, chipset, audio, graphics and other drivers for this laptop."; }
+                    for d in drivers: Text { text: "• " + d; color: Theme.text; wrap: word-wrap; }
+                    Text { text: driver-status; color: Theme.muted; wrap: word-wrap; }
+                    HorizontalLayout { alignment: start; spacing: 8px;
+                        Pill { width: 160px; label: driver-busy ? "Working…" : "Check for updates"; enabled: connected && !driver-busy; clicked => { check-drivers(); } }
+                        if drivers.length > 0: Pill { width: 160px; label: "Install all"; selected: true; enabled: connected && !driver-busy; clicked => { install-drivers(); } } } }
+                Card { title: "NVIDIA DRIVER";
+                    Text { text: gpu-driver == "" ? "Not installed" : "Installed: " + gpu-driver; color: Theme.text; }
+                    HorizontalLayout { alignment: start; spacing: 8px;
+                        Pill { width: 200px; label: "Get the latest driver"; selected: true; clicked => { open-driver-page(); } } }
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "Opens NVIDIA's driver download page. Compare its version with the installed one above."; } }
+                Rectangle {}
+            }
+
+            if page == 6: Flickable { VerticalLayout {
                 spacing: 16px;
                 Card { title: "THIS LAPTOP";
                     Text { text: model-name; color: Theme.text; font-size: 16px; font-weight: 600; }
@@ -352,12 +424,46 @@ export component AppWindow inherits Window {
                         text: "Unknown model: no register map matches this firmware, so Kestrel only shows system stats."; }
                     if connected && supported && read-only: Text { wrap: word-wrap; color: Theme.warn;
                         text: "Read-only: this firmware's register map is not confirmed on owner hardware, so Kestrel only reads sensors."; } }
+                Card { title: "POWER AUTOMATION";
+                    Text { text: "On battery"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 110px; label: "No change"; selected: auto-bat == -1; clicked => { auto-bat = -1; set-auto(auto-bat, auto-ac, auto-60hz); } }
+                        for s[i] in scenarios: Pill { width: 110px; label: s.label; selected: auto-bat == i; enabled: supported && !read-only; clicked => { auto-bat = i; set-auto(auto-bat, auto-ac, auto-60hz); } } }
+                    Text { text: "Plugged in"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 110px; label: "No change"; selected: auto-ac == -1; clicked => { auto-ac = -1; set-auto(auto-bat, auto-ac, auto-60hz); } }
+                        for s[i] in scenarios: Pill { width: 110px; label: s.label; selected: auto-ac == i; enabled: supported && !read-only; clicked => { auto-ac = i; set-auto(auto-bat, auto-ac, auto-60hz); } } }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 230px; label: auto-60hz ? "60 Hz on battery: on" : "60 Hz on battery: off"; selected: auto-60hz;
+                            clicked => { auto-60hz = !auto-60hz; set-auto(auto-bat, auto-ac, auto-60hz); } } }
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "Applied by the tray when you plug in or unplug, so keep kestrel-tray running. 60 Hz returns to the highest rate on AC."; } }
+                Card { title: "AUTO PROFILES";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "While a listed program runs, the tray switches to its scenario, then switches back when it closes."; }
+                    for r[i] in rules: HorizontalLayout { spacing: 10px; alignment: start;
+                        Text { text: r; color: Theme.text; vertical-alignment: center; min-width: 300px; }
+                        Pill { width: 90px; label: "Remove"; clicked => { remove-rule(i); } } }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Rectangle { width: 220px; height: 34px; border-radius: 8px; background: #0f1115; border-width: 1px; border-color: #2a2f3a;
+                            exe-input := TextInput { x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
+                            if exe-input.text == "": Text { x: 10px; text: "game.exe"; color: Theme.muted; vertical-alignment: center; font-size: 13px; } }
+                        for s[i] in scenarios: Pill { width: 100px; label: s.label; selected: rule-scn == i; clicked => { rule-scn = i; } }
+                        Pill { width: 80px; label: "Add"; selected: true; enabled: exe-input.text != "";
+                            clicked => { add-rule(exe-input.text, rule-scn); exe-input.text = ""; } } } }
+                Card { title: "WHEN I CLOSE THE LID";
+                    Text { text: "On battery"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        for a[i] in ["Do nothing", "Sleep", "Hibernate", "Shut down"]: Pill { width: 110px; label: a; selected: lid-dc == i; enabled: lid-dc >= 0; clicked => { set-lid(false, i); } } }
+                    Text { text: "Plugged in"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        for a[i] in ["Do nothing", "Sleep", "Hibernate", "Shut down"]: Pill { width: 110px; label: a; selected: lid-ac == i; enabled: lid-ac >= 0; clicked => { set-lid(true, i); } } }
+                    if lid-ac < 0: Text { text: "Could not read the Windows power plan. " + lid-error; color: Theme.muted; font-size: 12px; wrap: word-wrap; } }
                 if supported: Card { title: "SAFETY";
                     HorizontalLayout { alignment: start;
                         Pill { width: 230px; label: "Restore original EC values"; enabled: can-write; clicked => { restore(); } } }
                     Text { text: "Every register Kestrel changes is saved first and can be put back."; color: Theme.muted; font-size: 12px; } }
-                Rectangle {}
-            }
+            } }
         }
     }
 }

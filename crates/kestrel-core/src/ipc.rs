@@ -30,15 +30,58 @@ pub enum Request {
     },
     /// Put every register Kestrel changed back to its original value.
     RestoreDefaults,
+    GetLighting,
+    /// Static colour on a USB RGB device; `brightness` 0–100, 0 turns it off.
+    SetLighting {
+        device: String,
+        color: [u8; 3],
+        brightness: u8,
+    },
+    /// Driver updates Windows Update offers for this PC.
+    GetDriverUpdates,
+    /// Download and install the driver updates with these Windows Update IDs.
+    InstallDriverUpdates(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Response {
-    Hello { protocol: u32, version: String },
+    Hello {
+        protocol: u32,
+        version: String,
+    },
     Status(Box<Status>),
-    FanCurve { temps: Vec<u8>, speeds: Vec<u8> },
+    FanCurve {
+        temps: Vec<u8>,
+        speeds: Vec<u8>,
+    },
+    Lighting(Vec<LightDevice>),
+    Drivers(Vec<DriverUpdate>),
+    /// `failed`: Windows Update installed only some of them.
+    Installed {
+        reboot: bool,
+        failed: bool,
+    },
     Ok,
     Error(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DriverUpdate {
+    pub id: String,
+    pub title: String,
+    /// Windows driver class, e.g. "Net", "Bluetooth", "Display", "System".
+    pub class: String,
+    pub manufacturer: String,
+}
+
+/// A USB RGB device. `id` is `vid:pid` in hex; unsupported devices are listed so owners can report them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LightDevice {
+    pub id: String,
+    pub name: String,
+    /// "keyboard", "lightbar", "mouse" or "unknown".
+    pub kind: String,
+    pub supported: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
