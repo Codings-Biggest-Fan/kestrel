@@ -1,0 +1,29 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      KESTREL_UPDATE_PUBKEY: ${{ vars.KESTREL_UPDATE_PUBKEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --workspace
+      - name: Stage, hash and sign
+        shell: pwsh
+        env:
+          KESTREL_SIGNING_KEY: ${{ secrets.KESTREL_SIGNING_KEY }}
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/kestrel-svc.exe, target/release/kestrel-tray.exe, target/release/kestrel-ui.exe dist/
+          ./target/release/kestrel-sign.exe $v dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

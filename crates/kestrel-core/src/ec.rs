@@ -266,7 +266,7 @@ impl MsiEc {
             } else {
                 self.io.read(a)? as u32
             };
-            Ok(Some(if raw == 0 { 0 } else { t.rpm_const / raw }))
+            Ok(Some(t.rpm_const.checked_div(raw).unwrap_or(0)))
         };
         Ok([rpm(t.cpu_address)?, rpm(t.gpu_address)?])
     }
