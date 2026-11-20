@@ -122,6 +122,7 @@ component Unsupported inherits Card {
 }
 
 export struct ScenarioItem { label: string, hint: string }
+export struct LightItem { id: string, name: string, kind: string, supported: bool }
 
 export component AppWindow inherits Window {
     title: "Kestrel";
@@ -172,6 +173,13 @@ export component AppWindow inherits Window {
     callback set-boost(bool);
     callback set-charge(int);
     callback set-kbd(int);
+    in property <[LightItem]> lights;
+    in property <[color]> swatches;
+    in-out property <int> light-sel: 0;
+    in-out property <int> light-swatch: 0;
+    in-out property <int> light-bright: 100;
+    callback load-lights();
+    callback set-light(string, int, int);
     callback restore();
     in property <bool> has-curve;
     in-out property <bool> curve-gpu;
@@ -339,7 +347,22 @@ export component AppWindow inherits Window {
                     HorizontalLayout { spacing: 8px; alignment: start;
                         for v in kbd-max + 1: Pill { width: 72px; label: v == 0 ? "Off" : v; selected: kbd-level == v; enabled: has-kbd && can-write; clicked => { set-kbd(v); } } }
                     if !has-kbd: Text { text: "This model's backlight is not controlled through the EC."; color: Theme.muted; font-size: 12px; } }
-                Card { title: "RGB DEVICES"; Text { text: "Mouse and keyboard RGB arrive in M4."; color: Theme.muted; } }
+                Card { title: "RGB DEVICES";
+                    if lights.length == 0: Text { text: connected ? "No MSI or SteelSeries RGB devices found." : "Service offline."; color: Theme.muted; font-size: 12px; }
+                    for d[i] in lights: HorizontalLayout { spacing: 10px; alignment: start;
+                        Pill { width: 260px; label: d.name; selected: light-sel == i; enabled: d.supported; clicked => { light-sel = i; } }
+                        Text { vertical-alignment: center; color: Theme.muted; font-size: 12px;
+                            text: d.supported ? d.kind + "  " + d.id : "Not supported yet. Report " + d.id + " on GitHub."; } }
+                    if lights.length > 0 && lights[light-sel].supported: VerticalLayout { spacing: 12px;
+                        HorizontalLayout { spacing: 8px; alignment: start;
+                            for c[i] in swatches: Rectangle { width: 32px; height: 32px; border-radius: 16px; background: c;
+                                border-width: light-swatch == i ? 3px : 0px; border-color: Theme.text;
+                                TouchArea { clicked => { light-swatch = i; } } } }
+                        HorizontalLayout { spacing: 8px; alignment: start;
+                            for v in [0, 25, 50, 75, 100]: Pill { width: 64px; label: v == 0 ? "Off" : v + "%"; selected: light-bright == v; clicked => { light-bright = v; } } }
+                        HorizontalLayout { spacing: 8px; alignment: start;
+                            Pill { width: 120px; label: "Apply"; selected: true; enabled: connected; clicked => { set-light(lights[light-sel].id, light-swatch, light-bright); } } } }
+                    HorizontalLayout { alignment: start; Pill { width: 120px; label: "Rescan"; clicked => { load-lights(); } } } }
                 Rectangle {}
             }
 

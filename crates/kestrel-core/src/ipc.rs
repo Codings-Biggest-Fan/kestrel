@@ -23,6 +23,9 @@ pub enum Request {
     SetFanCurve { gpu: bool, speeds: Vec<u8> },
     /// Put every register Kestrel changed back to its original value.
     RestoreDefaults,
+    GetLighting,
+    /// Static colour on a USB RGB device; `brightness` 0–100, 0 turns it off.
+    SetLighting { device: String, color: [u8; 3], brightness: u8 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -30,8 +33,19 @@ pub enum Response {
     Hello { protocol: u32, version: String },
     Status(Box<Status>),
     FanCurve { temps: Vec<u8>, speeds: Vec<u8> },
+    Lighting(Vec<LightDevice>),
     Ok,
     Error(String),
+}
+
+/// A USB RGB device. `id` is `vid:pid` in hex; unsupported devices are listed so owners can report them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LightDevice {
+    pub id: String,
+    pub name: String,
+    /// "keyboard", "lightbar", "mouse" or "unknown".
+    pub kind: String,
+    pub supported: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

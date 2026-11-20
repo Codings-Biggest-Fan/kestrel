@@ -142,6 +142,28 @@ fn ints(v: &[u8]) -> ModelRc<i32> {
     ModelRc::new(VecModel::from(v.iter().map(|&x| i32::from(x)).collect::<Vec<_>>()))
 }
 
+const SWATCHES: [[u8; 3]; 8] = [
+    [255, 32, 32], [255, 128, 0], [255, 220, 0], [32, 255, 64],
+    [0, 220, 255], [32, 64, 255], [170, 48, 255], [255, 255, 255],
+];
+
+fn load_lights(weak: Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        let r = kestrel_core::transport::client().and_then(|mut c| c.call(&Request::GetLighting));
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if let Ok(Response::Lighting(devs)) = r {
+                let first = devs.iter().position(|d| d.supported).unwrap_or(0);
+                let items: Vec<LightItem> = devs
+                    .into_iter()
+                    .map(|d| LightItem { id: d.id.into(), name: d.name.into(), kind: d.kind.into(), supported: d.supported })
+                    .collect();
+                ui.set_lights(ModelRc::new(VecModel::from(items)));
+                ui.set_light_sel(first as i32);
+            }
+        });
+    });
+}
+
 static CURVE_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// Only the newest load for the selected fan may fill the editor; Apply stays disabled
@@ -194,6 +216,17 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_charge(move |p| send(w.clone(), Request::SetChargeLimit(p.clamp(10, 100) as u8)));
     let w = ui.as_weak();
     ui.on_set_kbd(move |l| send(w.clone(), Request::SetKbdBacklight(l.clamp(0, 3) as u8)));
+    ui.set_swatches(ModelRc::new(VecModel::from(
+        SWATCHES.iter().map(|&[r, g, b]| slint::Color::from_rgb_u8(r, g, b)).collect::<Vec<_>>(),
+    )));
+    let w = ui.as_weak();
+    ui.on_load_lights(move || load_lights(w.clone()));
+    let w = ui.as_weak();
+    ui.on_set_light(move |id, swatch, bright| {
+        let color = SWATCHES[(swatch.max(0) as usize).min(SWATCHES.len() - 1)];
+        send(w.clone(), Request::SetLighting { device: id.to_string(), color, brightness: bright.clamp(0, 100) as u8 });
+    });
+    load_lights(ui.as_weak());
     let w = ui.as_weak();
     ui.on_restore(move || send(w.clone(), Request::RestoreDefaults));
     let w = ui.as_weak();

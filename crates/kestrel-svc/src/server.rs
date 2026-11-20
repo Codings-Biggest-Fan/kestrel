@@ -66,7 +66,7 @@ fn result(r: Result<(), String>) -> Response {
 /// Every hardware-changing request is logged with its result and the control registers
 /// afterwards, so a console run on a real laptop shows exactly what the EC accepted.
 pub fn dispatch(st: &mut State, req: Request) -> Response {
-    if matches!(req, Request::GetStatus | Request::Hello { .. } | Request::GetFanCurve { .. }) {
+    if matches!(req, Request::GetStatus | Request::Hello { .. } | Request::GetFanCurve { .. } | Request::GetLighting) {
         return dispatch_inner(st, req);
     }
     let desc = format!("{req:?}");
@@ -103,6 +103,11 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
         }
         Request::SetCoolerBoost(on) => result(with_ec(st, |ec| ec.set_cooler_boost(on))),
         Request::SetChargeLimit(p) => result(with_ec(st, |ec| ec.set_charge_limit(p))),
+        Request::GetLighting => Response::Lighting(crate::lighting::list()),
+        Request::SetLighting { device, color, brightness } => match crate::lighting::set(&device, color, brightness) {
+            Ok(()) => Response::Ok,
+            Err(e) => Response::Error(e),
+        },
         Request::SetKbdBacklight(l) => result(with_ec(st, |ec| ec.set_kbd_backlight(l))),
         Request::GetFanCurve { gpu } => match st.ec.as_mut().map(|ec| ec.fan_curve(gpu)) {
             Some(Ok((temps, speeds))) => Response::FanCurve { temps, speeds },
