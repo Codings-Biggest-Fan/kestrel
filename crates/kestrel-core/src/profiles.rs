@@ -64,7 +64,10 @@ pub fn save(list: &[Profile]) -> std::io::Result<()> {
     let dir = user_dir();
     std::fs::create_dir_all(&dir)?;
     let json = serde_json::to_string_pretty(list).map_err(std::io::Error::other)?;
-    std::fs::write(dir.join("profiles.json"), json)
+    // Write then rename, so a failed write never leaves a truncated list behind.
+    let tmp = dir.join("profiles.json.tmp");
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(tmp, dir.join("profiles.json"))
 }
 
 /// Requests in apply order. The scenario goes first; a curve may then switch the EC to
