@@ -2,6 +2,30 @@
 //! AMD: SMU MP1 mailbox writes via the RyzenSMU module. Intel: MSR_PKG_POWER_LIMIT via IntelMSR.
 
 use kestrel_core::cpu_power::{self as cp, AmdFamily, CpuPowerInfo};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Set by `--mock`: CPU power requests go to the in-memory stand-in, never the host CPU.
+pub static MOCK: AtomicBool = AtomicBool::new(false);
+
+fn mocked() -> bool {
+    cfg!(not(windows)) || MOCK.load(Ordering::Relaxed)
+}
+
+fn available() -> Result<(), String> {
+    if mocked() { mock::available() } else { imp::available() }
+}
+fn smu_send(mb: cp::Mailbox, msg: u32, arg0: u32) -> Result<(), String> {
+    if mocked() { mock::smu_send(mb, msg, arg0) } else { imp::smu_send(mb, msg, arg0) }
+}
+fn intel_read() -> Result<cp::IntelLimits, String> {
+    if mocked() { mock::intel_read() } else { imp::intel_read() }
+}
+fn intel_write(pl1: u32, pl2: u32) -> Result<(), String> {
+    if mocked() { mock::intel_write(pl1, pl2) } else { imp::intel_write(pl1, pl2) }
+}
+fn intel_restore() -> Result<(), String> {
+    if mocked() { mock::intel_restore() } else { imp::intel_restore() }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Cpu {
@@ -40,14 +64,14 @@ pub fn info() -> CpuPowerInfo {
     let mut i = CpuPowerInfo { cpu: name, ..Default::default() };
     match cpu {
         Cpu::Other => i.note = "Power limits aren't supported on this CPU.".into(),
-        Cpu::Amd(_) => match imp::available() {
+        Cpu::Amd(_) => match available() {
             Ok(()) => {
                 i.supported = true;
                 i.note = "The CPU doesn't report its current limits. Defaults return after a reboot.".into();
             }
             Err(e) => i.note = e,
         },
-        Cpu::Intel => match imp::intel_read() {
+        Cpu::Intel => match intel_read() {
             Ok(l) if l.locked => i.note = "The BIOS has locked the power limits on this laptop.".into(),
             Ok(l) => {
                 i.supported = true;
@@ -64,14 +88,17 @@ pub fn set(sustained_w: u32, boost_w: u32) -> Result<(), String> {
     let (s, b) = cp::clamp(sustained_w, boost_w);
     match detect().0 {
         Cpu::Amd(f) => {
+            // One request's three messages must not interleave with another's.
+            static SET: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let _g = SET.lock().unwrap_or_else(|p| p.into_inner());
             let mb = f.mp1();
             let (stapm, fast, slow) = f.messages();
             for (msg, w) in [(stapm, s), (slow, s), (fast, b)] {
-                imp::smu_send(mb, msg, w * 1000)?;
+                smu_send(mb, msg, w * 1000)?;
             }
             Ok(())
         }
-        Cpu::Intel => imp::intel_write(s, b),
+        Cpu::Intel => intel_write(s, b),
         Cpu::Other => Err("Power limits aren't supported on this CPU.".into()),
     }
 }
@@ -79,7 +106,7 @@ pub fn set(sustained_w: u32, boost_w: u32) -> Result<(), String> {
 /// Puts back the limits found before Kestrel first changed them (Intel only).
 pub fn reset() -> Result<(), String> {
     match detect().0 {
-        Cpu::Intel => imp::intel_restore(),
+        Cpu::Intel => intel_restore(),
         _ => Err("This CPU doesn't report its default limits. Reboot to restore them.".into()),
     }
 }
@@ -111,8 +138,8 @@ mod imp {
     fn open(blob: &[u8]) -> Result<Module, String> {
         // SAFETY: loading PawnIOLib and resolving its documented exports with matching signatures.
         unsafe {
+            // Fixed path only: a search-order lookup could load a planted DLL as LocalSystem.
             let lib = LoadLibraryW(w!("C:\\Program Files\\PawnIO\\PawnIOLib.dll"))
-                .or_else(|_| LoadLibraryW(w!("PawnIOLib.dll")))
                 .map_err(|_| NOT_INSTALLED.to_string())?;
             let f = |n: PCSTR| GetProcAddress(lib, n).ok_or_else(|| NOT_INSTALLED.to_string());
             let open: Open = std::mem::transmute(f(s!("pawnio_open"))?);
@@ -137,7 +164,11 @@ mod imp {
 
     static SMU: Mutex<Option<Module>> = Mutex::new(None);
     static MSR: Mutex<Option<Module>> = Mutex::new(None);
-    static INTEL_ORIGINAL: Mutex<Option<u64>> = Mutex::new(None);
+    /// The limits found before Kestrel's first write, kept on disk so a service restart can
+    /// still restore them.
+    fn original_path() -> std::path::PathBuf {
+        crate::settings::data_dir().join("intel_power_limit.orig")
+    }
 
     fn with<T>(m: &Mutex<Option<Module>>, blob: &[u8], f: impl FnOnce(&Module) -> Result<T, String>) -> Result<T, String> {
         let mut g = m.lock().unwrap_or_else(|p| p.into_inner());
@@ -225,7 +256,11 @@ mod imp {
             if old >> 63 == 1 {
                 return Err("The BIOS has locked the power limits on this laptop.".into());
             }
-            INTEL_ORIGINAL.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert(old);
+            let orig = original_path();
+            if !orig.exists() {
+                std::fs::create_dir_all(crate::settings::data_dir()).map_err(|e| e.to_string())?;
+                std::fs::write(&orig, format!("{old:#x}")).map_err(|e| format!("Couldn't save the original limits: {e}"))?;
+            }
             let new = cp::intel_encode(units, old, pl1, pl2);
             m.call(s!("ioctl_write_msr"), &[cp::MSR_PKG_POWER_LIMIT.into(), new], &mut [])?;
             let back = msr(m, cp::MSR_PKG_POWER_LIMIT)?;
@@ -238,14 +273,20 @@ mod imp {
     }
 
     pub fn intel_restore() -> Result<(), String> {
-        let Some(orig) = *INTEL_ORIGINAL.lock().unwrap_or_else(|p| p.into_inner()) else { return Ok(()) };
-        with(&MSR, INTEL_MSR, |m| m.call(s!("ioctl_write_msr"), &[cp::MSR_PKG_POWER_LIMIT.into(), orig], &mut []))
+        let path = original_path();
+        let Ok(text) = std::fs::read_to_string(&path) else { return Ok(()) };
+        let orig = u64::from_str_radix(text.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
+        with(&MSR, INTEL_MSR, |m| m.call(s!("ioctl_write_msr"), &[cp::MSR_PKG_POWER_LIMIT.into(), orig], &mut []))?;
+        let _ = std::fs::remove_file(path);
+        Ok(())
     }
 }
 
-/// Development stand-in: remembers the last limits so the UI can be exercised.
 #[cfg(not(windows))]
-mod imp {
+use mock as imp;
+
+/// Development stand-in: remembers the last limits so the UI can be exercised.
+mod mock {
     use kestrel_core::cpu_power::{IntelLimits, Mailbox};
     use std::sync::Mutex;
 
