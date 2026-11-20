@@ -46,6 +46,20 @@ fn spark(q: &VecDeque<f32>) -> SharedString {
     s.into()
 }
 
+/// 270° ring arc (gap at the bottom) filled to `frac`, in a 100x100 viewbox.
+fn arc(frac: f32) -> SharedString {
+    let frac = frac.clamp(0.0, 1.0);
+    if frac < 0.005 {
+        return SharedString::new();
+    }
+    let (r, a0) = (42.0f32, 135f32.to_radians());
+    let a1 = a0 + 270f32.to_radians() * frac.min(0.9999);
+    let pt = |a: f32| (50.0 + r * a.cos(), 50.0 + r * a.sin());
+    let ((x0, y0), (x1, y1)) = (pt(a0), pt(a1));
+    let large = u8::from(270.0 * frac > 180.0);
+    format!("M{x0:.2} {y0:.2} A{r} {r} 0 {large} 1 {x1:.2} {y1:.2}").into()
+}
+
 fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32>) {
     if !ui.get_connected() {
         // Errors from while the service was down no longer apply.
@@ -64,7 +78,11 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_cpu_fan(fan(s.cpu_fan_rpm, s.cpu_fan_pct));
     ui.set_gpu_fan(fan(s.gpu_fan_rpm, s.gpu_fan_pct));
     ui.set_cpu_load(s.cpu_load_pct);
-    ui.set_ram(format!("{:.1} / {:.0} GB", s.ram_used_mb as f32 / 1024.0, s.ram_total_mb as f32 / 1024.0).into());
+    ui.set_cpu_arc(arc(s.cpu_temp.unwrap_or(0) as f32 / 100.0));
+    ui.set_gpu_arc(arc(s.gpu_temp.unwrap_or(0) as f32 / 100.0));
+    ui.set_load_arc(arc(s.cpu_load_pct / 100.0));
+    ui.set_ram_arc(arc(if s.ram_total_mb > 0 { s.ram_used_mb as f32 / s.ram_total_mb as f32 } else { 0.0 }));
+    ui.set_ram(format!("{:.1} of {:.0} GB", s.ram_used_mb as f32 / 1024.0, s.ram_total_mb as f32 / 1024.0).into());
     ui.set_ram_f(if s.ram_total_mb > 0 { s.ram_used_mb as f32 / s.ram_total_mb as f32 } else { 0.0 });
     ui.set_battery(opt(s.battery_pct, "%"));
     ui.set_power_source(match s.on_ac { Some(true) => "Plugged in", Some(false) => "On battery", None => "Unknown" }.into());
@@ -130,6 +148,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let items: Vec<ScenarioItem> =
         Scenario::ALL.iter().map(|&s| ScenarioItem { label: s.label().into(), hint: hint(s).into() }).collect();
     ui.set_scenarios(ModelRc::new(VecModel::from(items)));
+    ui.set_track(arc(1.0));
 
     let w = ui.as_weak();
     ui.on_set_scenario(move |i| {
@@ -148,5 +167,37 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let w = ui.as_weak();
     std::thread::Builder::new().name("poll".into()).stack_size(256 * 1024).spawn(move || poll(w)).ok();
-    ui.run()
+    ui.show()?;
+    #[cfg(windows)]
+    win::style_title_bar(&ui);
+    slint::run_event_loop()?;
+    ui.hide()
+}
+
+#[cfg(windows)]
+mod win {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+
+    const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWA_CAPTION_COLOR: u32 = 35;
+    const DWMWCP_ROUND: u32 = 2;
+    const CAPTION_BGR: u32 = 0x0011_0d0c; // Theme.bg #0c0d11
+
+    /// Dark, rounded Windows 11 title bar in the app's background colour. No-op on older Windows.
+    pub fn style_title_bar(ui: &super::AppWindow) {
+        use slint::ComponentHandle;
+        let handle = ui.window().window_handle();
+        let Ok(h) = handle.window_handle() else { return };
+        let RawWindowHandle::Win32(h) = h.as_raw() else { return };
+        let hwnd = h.hwnd.get() as _;
+        for (attr, val) in [
+            (DWMWA_USE_IMMERSIVE_DARK_MODE, 1u32),
+            (DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND),
+            (DWMWA_CAPTION_COLOR, CAPTION_BGR),
+        ] {
+            unsafe { DwmSetWindowAttribute(hwnd, attr, &val as *const u32 as _, 4) };
+        }
+    }
 }

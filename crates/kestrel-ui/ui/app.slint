@@ -1,42 +1,62 @@
-import { Slider } from "std-widgets.slint";
+import "fonts/Inter-Regular.ttf";
+import "fonts/Inter-Medium.ttf";
+import "fonts/Inter-SemiBold.ttf";
+import "fonts/Inter-Bold.ttf";
 
 global Theme {
-    out property <color> bg: #0e1014;
-    out property <color> panel: #161920;
-    out property <color> card: #1c2029;
-    out property <color> line: #262b36;
-    out property <color> text: #e8eaf0;
-    out property <color> muted: #8a91a3;
-    out property <color> accent: #e5484d;
+    out property <color> bg: #0c0d11;
+    out property <color> panel: #111318;
+    out property <brush> card: @linear-gradient(180deg, #1a1d25 0%, #16181f 100%);
+    out property <color> card-hover: #1e222b;
+    out property <color> line: #23272f;
+    out property <color> text: #eceef3;
+    out property <color> muted: #8b92a3;
+    out property <color> faint: #5c6373;
+    out property <color> accent: #ff4d57;
     out property <color> accent-fill: #c4282d; // white text >= 4.5:1
-    out property <color> good: #46a758;
+    out property <color> good: #3ecf8e;
     out property <color> warn: #f5a524;
+    out property <color> blue: #4c9dff;
+}
+
+component Icon inherits Path {
+    in property <string> d;
+    width: 18px; height: 18px;
+    viewbox-width: 24; viewbox-height: 24;
+    commands: d;
+    fill: transparent;
+    stroke-width: 1.7px;
 }
 
 component Card inherits Rectangle {
     in property <string> title;
     background: Theme.card;
-    border-radius: 12px;
+    border-radius: 14px;
     border-width: 1px;
     border-color: Theme.line;
     VerticalLayout {
-        padding: 16px;
-        spacing: 10px;
-        if title != "": Text { text: title; color: Theme.muted; font-size: 12px; font-weight: 600; }
+        padding: 18px;
+        spacing: 12px;
+        if title != "": Text { text: title; color: Theme.muted; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; }
         @children
     }
 }
 
 component NavItem inherits Rectangle {
     in property <string> label;
+    in property <string> icon;
     in property <bool> active;
     callback clicked;
-    height: 36px;
-    border-radius: 8px;
-    background: active ? Theme.card : ta.has-hover ? #1a1d24 : transparent;
-    ta := TouchArea { clicked => { root.clicked(); } }
-    Rectangle { x: 0; width: 3px; height: 16px; border-radius: 2px; background: active ? Theme.accent : transparent; }
-    Text { x: 14px; text: label; color: active ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; }
+    height: 38px;
+    border-radius: 10px;
+    background: active ? #1c1f27 : ta.has-hover ? #171a20 : transparent;
+    animate background { duration: 120ms; }
+    ta := TouchArea { clicked => { root.clicked(); } mouse-cursor: pointer; }
+    HorizontalLayout {
+        padding-left: 12px; spacing: 12px;
+        Icon { y: (parent.height - self.height) / 2; d: icon; stroke: active ? Theme.accent : Theme.muted; }
+        Text { text: label; color: active ? Theme.text : Theme.muted; font-size: 13px; font-weight: active ? 600 : 500; vertical-alignment: center; }
+    }
 }
 
 component Pill inherits Rectangle {
@@ -44,33 +64,46 @@ component Pill inherits Rectangle {
     in property <bool> selected;
     in property <bool> enabled: true;
     callback clicked;
-    height: 34px;
-    border-radius: 8px;
-    background: selected ? Theme.accent-fill : ta.has-hover && enabled ? #262b36 : Theme.panel;
+    height: 36px;
+    border-radius: 10px;
+    background: selected ? Theme.accent-fill : ta.pressed ? #2a2f3a : ta.has-hover && enabled ? #232731 : #1b1e26;
+    border-width: 1px;
+    border-color: selected ? Theme.accent-fill : Theme.line;
     opacity: enabled ? 1 : 0.4;
-    ta := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
-    Text { text: label; color: selected ? white : Theme.text; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+    animate background { duration: 140ms; }
+    ta := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } mouse-cursor: root.enabled ? pointer : default; }
+    Text { text: label; color: selected ? white : Theme.text; font-size: 13px; font-weight: 500; horizontal-alignment: center; vertical-alignment: center; }
 }
 
-component Metric inherits Card {
+// Ring gauge; `arc` and `track` are SVG paths in a 100x100 box built by the Rust side.
+component Gauge inherits Card {
+    in property <string> arc;
+    in property <string> track;
     in property <string> value;
     in property <string> unit;
     in property <string> sub;
-    in property <float> fill; // 0..1
-    Text { text: unit == "" ? value : value + " " + unit; color: Theme.text; font-size: 26px; font-weight: 700; }
-    Rectangle {
-        height: 4px; border-radius: 2px; background: Theme.line;
-        Rectangle { x: 0; width: parent.width * clamp(fill, 0, 1); border-radius: 2px;
-            background: fill > 0.85 ? Theme.accent : fill > 0.65 ? Theme.warn : Theme.good;
-            animate width { duration: 300ms; easing: ease-out; } }
+    in property <float> fill;
+    HorizontalLayout {
+        spacing: 16px;
+        Rectangle {
+            width: 76px; height: 76px;
+            Path { width: 100%; height: 100%; viewbox-width: 100; viewbox-height: 100; commands: track; stroke: #262a34; stroke-width: 7px; fill: transparent; }
+            if arc != "": Path { width: 100%; height: 100%; viewbox-width: 100; viewbox-height: 100; commands: arc; fill: transparent; stroke-width: 7px;
+                stroke: fill > 0.85 ? Theme.accent : fill > 0.65 ? Theme.warn : Theme.good; }
+            Text { text: value; color: Theme.text; font-size: 20px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        VerticalLayout {
+            alignment: center; spacing: 4px;
+            Text { text: unit; color: Theme.text; font-size: 14px; font-weight: 600; }
+            Text { text: sub; color: Theme.muted; font-size: 12px; }
+        }
     }
-    Text { text: sub; color: Theme.muted; font-size: 12px; }
 }
 
 component Sparkline inherits Rectangle {
     in property <string> commands; // SVG path in a 100x100 box
     in property <color> stroke: Theme.accent;
-    height: 64px;
+    height: 70px;
     if commands != "": Path {
         width: 100%; height: 100%;
         viewbox-width: 100; viewbox-height: 100;
@@ -88,11 +121,12 @@ export struct ScenarioItem { label: string, hint: string }
 
 export component AppWindow inherits Window {
     title: "Kestrel";
-    preferred-width: 1040px;
-    preferred-height: 680px;
-    min-width: 860px;
-    min-height: 560px;
+    preferred-width: 1080px;
+    preferred-height: 700px;
+    min-width: 880px;
+    min-height: 580px;
     background: Theme.bg;
+    default-font-family: "Inter";
     default-font-size: 13px;
 
     in property <bool> connected;
@@ -108,6 +142,11 @@ export component AppWindow inherits Window {
     in property <string> gpu-temp: "–";
     in property <float> cpu-temp-f;
     in property <float> gpu-temp-f;
+    in property <string> cpu-arc;
+    in property <string> gpu-arc;
+    in property <string> load-arc;
+    in property <string> ram-arc;
+    in property <string> track;
     in property <string> cpu-fan: "–";
     in property <string> gpu-fan: "–";
     in property <float> cpu-load;
@@ -133,56 +172,82 @@ export component AppWindow inherits Window {
 
     property <int> page: 0;
     property <[string]> pages: ["Dashboard", "Scenarios", "Fans", "Battery", "Lighting", "Settings"];
+    property <[string]> subtitles: ["Live temperatures, fans and load", "Power and fan profiles", "Cooling and Cooler Boost", "Charging and power source", "Keyboard and RGB devices", "Model, firmware and safety"];
+    // Lucide-style 24x24 outline icons.
+    property <[string]> icons: [
+        "M3 13h8V3H3zM13 21h8V11h-8zM13 3v6h8V3zM3 21h8v-6H3z",
+        "M13 2 3 14h9l-1 8 10-12h-9z",
+        "M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M12 10c0-4 1-7 4-7s3 4-2 7M14 12c4 0 7 1 7 4s-4 3-7-2M12 14c0 4-1 7-4 7s-3-4 2-7M10 12c-4 0-7-1-7-4s4-3 7 2",
+        "M3 7h15a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM22 11v2M6 10v4M10 10v4",
+        "M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M7 14h10",
+        "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
+    ];
 
     HorizontalLayout {
         Rectangle {
-            width: 200px;
+            width: 220px;
             background: Theme.panel;
+            Rectangle { x: parent.width - 1px; width: 1px; background: Theme.line; }
             VerticalLayout {
-                padding: 14px;
+                padding: 16px;
                 spacing: 4px;
                 HorizontalLayout {
-                    padding-bottom: 18px; padding-left: 6px; spacing: 8px;
-                    Rectangle { width: 10px; height: 10px; y: 6px; border-radius: 5px; background: Theme.accent; }
-                    Text { text: "Kestrel"; color: Theme.text; font-size: 17px; font-weight: 700; }
+                    padding-bottom: 22px; padding-left: 8px; padding-top: 4px; spacing: 10px;
+                    Rectangle { width: 26px; height: 26px; border-radius: 8px;
+                        background: @linear-gradient(135deg, #ff6a5c 0%, #d81f3a 100%);
+                        Text { text: "K"; color: white; font-size: 14px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } }
+                    Text { text: "Kestrel"; color: Theme.text; font-size: 17px; font-weight: 700; vertical-alignment: center; }
                 }
-                for p[i] in pages: NavItem { label: p; active: page == i; clicked => { page = i; } }
+                for p[i] in pages: NavItem { label: p; icon: icons[i]; active: page == i; clicked => { page = i; } }
                 Rectangle {}
-                Text { text: model-name; color: Theme.text; font-size: 12px; wrap: word-wrap; }
-                Text { text: !connected ? "Service not running" : !supported ? "Unknown model" : read-only ? "Read-only" : "Connected";
-                       color: connected && supported && !read-only ? Theme.good : connected ? Theme.warn : Theme.accent; font-size: 11px; }
+                Rectangle {
+                    border-radius: 12px; background: #16181e; border-width: 1px; border-color: Theme.line;
+                    VerticalLayout { padding: 12px; spacing: 6px;
+                        Text { text: model-name; color: Theme.text; font-size: 12px; font-weight: 600; wrap: word-wrap; }
+                        HorizontalLayout { spacing: 6px;
+                            Rectangle { width: 7px; height: 7px; y: 4px; border-radius: 3.5px;
+                                background: connected && supported && !read-only ? Theme.good : connected ? Theme.warn : Theme.accent; }
+                            Text { text: !connected ? "Service not running" : !supported ? "Unknown model" : read-only ? "Read-only" : "Connected";
+                                   color: Theme.muted; font-size: 11px; } } }
+                }
             }
         }
 
         VerticalLayout {
-            padding: 24px;
-            spacing: 16px;
-            Text { text: pages[page]; color: Theme.text; font-size: 22px; font-weight: 700; }
+            padding: 28px;
+            padding-top: 24px;
+            spacing: 18px;
+            VerticalLayout { spacing: 4px;
+                Text { text: pages[page]; color: Theme.text; font-size: 24px; font-weight: 700; }
+                Text { text: subtitles[page]; color: Theme.muted; font-size: 13px; } }
             if message != "": Rectangle {
-                background: #2a1d1f; border-radius: 8px; height: 34px;
-                Text { x: 12px; text: message; color: #ffb4b6; vertical-alignment: center; }
+                background: #2a1618; border-radius: 10px; height: 38px; border-width: 1px; border-color: #5a2328;
+                Text { x: 14px; text: message; color: #ffb4b6; vertical-alignment: center; }
             }
 
             if page == 0: VerticalLayout {
                 spacing: 16px;
                 HorizontalLayout {
                     spacing: 16px;
-                    Metric { title: "CPU"; value: cpu-temp; unit: "°C"; fill: cpu-temp-f; sub: "Fan " + cpu-fan; }
-                    Metric { title: "GPU"; value: gpu-temp; unit: "°C"; fill: gpu-temp-f; sub: "Fan " + gpu-fan; }
-                    Metric { title: "CPU LOAD"; value: round(cpu-load); unit: "%"; fill: cpu-load / 100; sub: "All cores"; }
-                    Metric { title: "MEMORY"; value: ram; unit: ""; fill: ram-f; sub: "In use"; }
+                    Gauge { title: "CPU"; arc: cpu-arc; track: track; fill: cpu-temp-f; value: cpu-temp; unit: "°C"; sub: "Fan " + cpu-fan; }
+                    Gauge { title: "GPU"; arc: gpu-arc; track: track; fill: gpu-temp-f; value: gpu-temp; unit: "°C"; sub: "Fan " + gpu-fan; }
+                    Gauge { title: "CPU LOAD"; arc: load-arc; track: track; fill: cpu-load / 100; value: round(cpu-load); unit: "%"; sub: "All cores"; }
+                    Gauge { title: "MEMORY"; arc: ram-arc; track: track; fill: ram-f; value: round(ram-f * 100); unit: "%"; sub: ram; }
                 }
                 HorizontalLayout {
                     spacing: 16px;
-                    Card { title: "CPU TEMPERATURE · 60 s"; Sparkline { commands: temp-history; } }
-                    Card { title: "CPU LOAD · 60 s"; Sparkline { commands: cpu-history; stroke: #3e9bff; } }
+                    Card { title: "CPU TEMPERATURE · 60 S"; Sparkline { commands: temp-history; } }
+                    Card { title: "CPU LOAD · 60 S"; Sparkline { commands: cpu-history; stroke: Theme.blue; } }
                 }
                 HorizontalLayout {
                     spacing: 16px;
                     if supported: Card { title: "SCENARIO";
                         HorizontalLayout { spacing: 8px;
                             for s[i] in scenarios: Pill { label: s.label; selected: scenario == i; enabled: can-write; clicked => { set-scenario(i); } } } }
-                    Card { title: "POWER"; Text { text: battery + "  ·  " + power-source; color: Theme.text; font-size: 15px; } }
+                    Card { title: "POWER";
+                        HorizontalLayout { spacing: 10px;
+                            Text { text: battery; color: Theme.text; font-size: 20px; font-weight: 700; vertical-alignment: center; }
+                            Text { text: power-source; color: Theme.muted; vertical-alignment: center; } } }
                 }
                 Rectangle {}
             }
@@ -191,14 +256,18 @@ export component AppWindow inherits Window {
                 spacing: 12px;
                 if connected && !supported: Unsupported {}
                 for s[i] in supported ? scenarios : []: Rectangle {
-                    height: 64px; border-radius: 12px;
-                    background: scenario == i ? #2a1d1f : sa.has-hover && can-write ? #20242e : Theme.card;
+                    height: 68px; border-radius: 14px;
+                    background: scenario == i ? #24161a : sa.has-hover && can-write ? Theme.card-hover : #17191f;
                     border-width: 1px; border-color: scenario == i ? Theme.accent : Theme.line;
                     opacity: can-write ? 1 : 0.45;
-                    sa := TouchArea { enabled: can-write; clicked => { set-scenario(i); } }
-                    VerticalLayout { padding-left: 16px; alignment: center; spacing: 2px;
-                        Text { text: s.label; color: Theme.text; font-size: 15px; font-weight: 600; }
-                        Text { text: s.hint; color: Theme.muted; font-size: 12px; } }
+                    animate background, border-color { duration: 140ms; }
+                    sa := TouchArea { enabled: can-write; clicked => { set-scenario(i); } mouse-cursor: can-write ? pointer : default; }
+                    HorizontalLayout { padding-left: 18px; padding-right: 18px; spacing: 14px;
+                        Rectangle { width: 10px; height: 10px; y: (parent.height - 10px) / 2; border-radius: 5px;
+                            background: scenario == i ? Theme.accent : transparent; border-width: 2px; border-color: scenario == i ? Theme.accent : Theme.faint; }
+                        VerticalLayout { alignment: center; spacing: 3px;
+                            Text { text: s.label; color: Theme.text; font-size: 15px; font-weight: 600; }
+                            Text { text: s.hint; color: Theme.muted; font-size: 12px; } } }
                 }
                 Rectangle {}
             }
@@ -206,14 +275,14 @@ export component AppWindow inherits Window {
             if page == 2: VerticalLayout {
                 spacing: 16px;
                 HorizontalLayout { spacing: 16px;
-                    Metric { title: "CPU FAN"; value: cpu-fan; unit: ""; fill: 0; sub: cpu-temp + " °C"; }
-                    Metric { title: "GPU FAN"; value: gpu-fan; unit: ""; fill: 0; sub: gpu-temp + " °C"; } }
+                    Gauge { title: "CPU FAN"; arc: cpu-arc; track: track; fill: cpu-temp-f; value: cpu-temp; unit: cpu-fan; sub: "CPU °C"; }
+                    Gauge { title: "GPU FAN"; arc: gpu-arc; track: track; fill: gpu-temp-f; value: gpu-temp; unit: gpu-fan; sub: "GPU °C"; } }
                 if connected && !supported: Unsupported {}
                 if supported: Card { title: "COOLER BOOST";
                     HorizontalLayout { spacing: 8px; alignment: start;
-                        Pill { width: 90px; label: "Off"; selected: !cooler-boost; enabled: has-boost && can-write; clicked => { set-boost(false); } }
-                        Pill { width: 90px; label: "On"; selected: cooler-boost; enabled: has-boost && can-write; clicked => { set-boost(true); } } }
-                    Text { text: "Runs both fans at full speed. Kestrel turns it off again if you quit."; color: Theme.muted; font-size: 12px; } }
+                        Pill { width: 96px; label: "Off"; selected: !cooler-boost; enabled: has-boost && can-write; clicked => { set-boost(false); } }
+                        Pill { width: 96px; label: "On"; selected: cooler-boost; enabled: has-boost && can-write; clicked => { set-boost(true); } } }
+                    Text { text: "Runs both fans at full speed."; color: Theme.muted; font-size: 12px; } }
                 Card { title: "FAN CURVE"; Text { text: "Curve editor arrives in M2 (verified EC tables only)."; color: Theme.muted; } }
                 Rectangle {}
             }
@@ -223,9 +292,12 @@ export component AppWindow inherits Window {
                 if connected && !supported: Unsupported {}
                 if supported: Card { title: "CHARGE LIMIT";
                     HorizontalLayout { spacing: 8px; alignment: start;
-                        for v in [60, 80, 100]: Pill { width: 90px; label: v + "%"; selected: charge-limit == v; enabled: has-charge && can-write; clicked => { set-charge(v); } } }
+                        for v in [60, 80, 100]: Pill { width: 96px; label: v + "%"; selected: charge-limit == v; enabled: has-charge && can-write; clicked => { set-charge(v); } } }
                     Text { text: "Stops charging at the limit. 80% is the best everyday setting for battery life."; color: Theme.muted; font-size: 12px; } }
-                Card { title: "BATTERY"; Text { text: battery + "  ·  " + power-source; color: Theme.text; font-size: 15px; } }
+                Card { title: "BATTERY";
+                    HorizontalLayout { spacing: 10px;
+                        Text { text: battery; color: Theme.text; font-size: 20px; font-weight: 700; }
+                        Text { text: power-source; color: Theme.muted; vertical-alignment: center; } } }
                 Rectangle {}
             }
 
@@ -234,7 +306,7 @@ export component AppWindow inherits Window {
                 if connected && !supported: Unsupported {}
                 if supported: Card { title: "KEYBOARD BACKLIGHT";
                     HorizontalLayout { spacing: 8px; alignment: start;
-                        for v in kbd-max + 1: Pill { width: 70px; label: v == 0 ? "Off" : v; selected: kbd-level == v; enabled: has-kbd && can-write; clicked => { set-kbd(v); } } }
+                        for v in kbd-max + 1: Pill { width: 72px; label: v == 0 ? "Off" : v; selected: kbd-level == v; enabled: has-kbd && can-write; clicked => { set-kbd(v); } } }
                     if !has-kbd: Text { text: "This model's backlight is not controlled through the EC."; color: Theme.muted; font-size: 12px; } }
                 Card { title: "RGB DEVICES"; Text { text: "Mouse and keyboard RGB arrive in M4."; color: Theme.muted; } }
                 Rectangle {}
@@ -243,7 +315,7 @@ export component AppWindow inherits Window {
             if page == 5: VerticalLayout {
                 spacing: 16px;
                 Card { title: "THIS LAPTOP";
-                    Text { text: model-name; color: Theme.text; font-size: 15px; }
+                    Text { text: model-name; color: Theme.text; font-size: 16px; font-weight: 600; }
                     Text { text: "EC firmware " + firmware; color: Theme.muted; }
                     if connected && !supported: Text { wrap: word-wrap; color: Theme.warn;
                         text: "Unknown model: no register map matches this firmware, so Kestrel only shows system stats."; }
@@ -251,7 +323,7 @@ export component AppWindow inherits Window {
                         text: "Read-only: this firmware's register map is not confirmed on owner hardware, so Kestrel only reads sensors."; } }
                 if supported: Card { title: "SAFETY";
                     HorizontalLayout { alignment: start;
-                        Pill { width: 220px; label: "Restore original EC values"; enabled: can-write; clicked => { restore(); } } }
+                        Pill { width: 230px; label: "Restore original EC values"; enabled: can-write; clicked => { restore(); } } }
                     Text { text: "Every register Kestrel changes is saved first and can be put back."; color: Theme.muted; font-size: 12px; } }
                 Rectangle {}
             }
