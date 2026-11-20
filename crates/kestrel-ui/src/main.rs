@@ -176,6 +176,29 @@ fn load_lid(weak: Weak<AppWindow>) {
     });
 }
 
+fn load_gpu(weak: Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        let r = kestrel_core::gpu::query();
+        let _ = weak.upgrade_in_event_loop(move |ui| match r {
+            Ok(g) => {
+                let opt = |v: Option<u32>, unit: &str| v.map_or("–".to_string(), |v| format!("{v} {unit}"));
+                let power = g.power_w.map_or("–".to_string(), |w| format!("{w:.1} W"));
+                ui.set_gpu_stats(
+                    format!(
+                        "{} · {} · {} load · core {} · memory {} · {}",
+                        opt(g.temp_c, "°C"), power, opt(g.load_pct, "%"), opt(g.core_mhz, "MHz"), opt(g.mem_mhz, "MHz"), g.pstate
+                    )
+                    .into(),
+                );
+                ui.set_gpu_name(g.name.into());
+                ui.set_gpu_driver(g.driver.into());
+                ui.set_gpu_error(SharedString::default());
+            }
+            Err(e) => ui.set_gpu_error(e.into()),
+        });
+    });
+}
+
 static CURVE_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// Only the newest load for the selected fan may fill the editor; Apply stays disabled
@@ -265,6 +288,15 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     });
     load_lid(ui.as_weak());
+    let w = ui.as_weak();
+    ui.on_load_gpu(move || load_gpu(w.clone()));
+    ui.on_open_driver_page(|| {
+        #[cfg(windows)]
+        let _ = std::process::Command::new("explorer").arg(kestrel_core::gpu::DRIVER_PAGE).spawn();
+        #[cfg(not(windows))]
+        let _ = std::process::Command::new("xdg-open").arg(kestrel_core::gpu::DRIVER_PAGE).spawn();
+    });
+    load_gpu(ui.as_weak());
     let w = ui.as_weak();
     ui.on_restore(move || send(w.clone(), Request::RestoreDefaults));
     let w = ui.as_weak();
