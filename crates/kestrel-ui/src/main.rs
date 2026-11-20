@@ -142,10 +142,6 @@ fn send(weak: Weak<AppWindow>, req: Request) {
     });
 }
 
-fn ints(v: &[u8]) -> ModelRc<i32> {
-    ModelRc::new(VecModel::from(v.iter().map(|&x| i32::from(x)).collect::<Vec<_>>()))
-}
-
 const SWATCHES: [[u8; 3]; 8] = [
     [255, 32, 32], [255, 128, 0], [255, 220, 0], [32, 255, 64],
     [0, 220, 255], [32, 64, 255], [170, 48, 255], [255, 255, 255],
@@ -256,8 +252,7 @@ fn load_curve(weak: Weak<AppWindow>, gpu: bool) {
         let _ = weak.upgrade_in_event_loop(move |ui| match r {
             _ if CURVE_GEN.load(Ordering::SeqCst) != generation || ui.get_curve_gpu() != gpu => {}
             Ok(Response::FanCurve { temps, speeds }) => {
-                ui.set_curve_temps(ints(&temps));
-                ui.set_curve_speeds(ints(&speeds));
+                show_curve(&ui, &temps, &speeds);
                 ui.set_curve_ready(true);
             }
             Ok(Response::Error(e)) => ui.set_message(e.into()),
@@ -266,6 +261,60 @@ fn load_curve(weak: Weak<AppWindow>, gpu: bool) {
         });
     });
 }
+
+/// x of each point as a fraction of the graph width: temperature on a 20–100 °C axis,
+/// or evenly spaced if the firmware's temperatures are missing.
+fn curve_xs(temps: &[i32], n: usize) -> Vec<f32> {
+    if temps.len() == n && n > 0 {
+        temps.iter().map(|&t| ((t as f32 - 20.0) / 80.0).clamp(0.03, 0.97)).collect()
+    } else {
+        (0..n).map(|i| (i as f32 + 0.5) / n.max(1) as f32).collect()
+    }
+}
+
+/// Graph size in pixels; Slint keeps a path's aspect ratio, so paths are drawn in pixels.
+static GRAPH: std::sync::Mutex<(f32, f32)> = std::sync::Mutex::new((100.0, 100.0));
+
+/// SVG paths in a w×h viewbox: the curve held flat to both edges, and the area under it.
+fn curve_paths(xs: &[f32], speeds: &[i32]) -> (String, String) {
+    if xs.is_empty() || xs.len() != speeds.len() {
+        return (String::new(), String::new());
+    }
+    let (w, h) = *GRAPH.lock().unwrap_or_else(|p| p.into_inner());
+    let pt = |x: f32, v: i32| format!("{:.2} {:.2}", x * w, h * (1.0 - v.clamp(0, 100) as f32 / 100.0));
+    let mut line = format!("M {}", pt(0.0, speeds[0]));
+    for (x, v) in xs.iter().zip(speeds) {
+        line += &format!(" L {}", pt(*x, *v));
+    }
+    line += &format!(" L {}", pt(1.0, speeds[speeds.len() - 1]));
+    let fill = format!("{line} L {w:.2} {h:.2} L 0 {h:.2} Z");
+    (line, fill)
+}
+
+fn show_curve(ui: &AppWindow, temps: &[u8], speeds: &[u8]) {
+    let temps: Vec<i32> = temps.iter().map(|&t| i32::from(t)).collect();
+    let speeds: Vec<i32> = speeds.iter().map(|&v| i32::from(v)).collect();
+    let xs = curve_xs(&temps, speeds.len());
+    let (line, fill) = curve_paths(&xs, &speeds);
+    ui.set_curve_temps(ModelRc::new(VecModel::from(temps)));
+    ui.set_curve_speeds(ModelRc::new(VecModel::from(speeds)));
+    ui.set_curve_xs(ModelRc::new(VecModel::from(xs)));
+    ui.set_curve_line(line.into());
+    ui.set_curve_fill(fill.into());
+}
+
+/// Moves point `i` to `v` and pushes its neighbours so the curve stays non-decreasing.
+fn drag_point(speeds: &mut [i32], i: usize, v: i32) {
+    speeds[i] = v;
+    for s in &mut speeds[i + 1..] {
+        *s = (*s).max(v);
+    }
+    for s in &mut speeds[..i] {
+        *s = (*s).min(v);
+    }
+}
+
+static DRAG_I: AtomicU64 = AtomicU64::new(0);
 
 /// Clamp to 0-100 and make the curve non-decreasing, as the service requires.
 fn monotonic(speeds: impl Iterator<Item = i32>) -> Vec<u8> {
@@ -399,11 +448,42 @@ fn main() -> Result<(), slint::PlatformError> {
     let w = ui.as_weak();
     ui.on_load_curve(move |gpu| load_curve(w.clone(), gpu));
     let w = ui.as_weak();
+    ui.on_curve_resize(move |gw, gh| {
+        let Some(ui) = w.upgrade() else { return };
+        *GRAPH.lock().unwrap_or_else(|p| p.into_inner()) = (gw.max(1.0), gh.max(1.0));
+        let xs: Vec<f32> = ui.get_curve_xs().iter().collect();
+        let speeds: Vec<i32> = ui.get_curve_speeds().iter().collect();
+        let (line, fill) = curve_paths(&xs, &speeds);
+        ui.set_curve_line(line.into());
+        ui.set_curve_fill(fill.into());
+    });
+    let w = ui.as_weak();
+    ui.on_curve_drag(move |down, fx, fy| {
+        let Some(ui) = w.upgrade() else { return };
+        let xs: Vec<f32> = ui.get_curve_xs().iter().collect();
+        let mut speeds: Vec<i32> = ui.get_curve_speeds().iter().collect();
+        if speeds.is_empty() || xs.len() != speeds.len() {
+            return;
+        }
+        if down {
+            let near = xs.iter().enumerate().min_by(|a, b| (a.1 - fx).abs().total_cmp(&(b.1 - fx).abs())).map_or(0, |(i, _)| i);
+            DRAG_I.store(near as u64, Ordering::Relaxed);
+        }
+        let i = (DRAG_I.load(Ordering::Relaxed) as usize).min(speeds.len() - 1);
+        let v = (((1.0 - fy) * 20.0).round() as i32 * 5).clamp(0, 100);
+        drag_point(&mut speeds, i, v);
+        let (line, fill) = curve_paths(&xs, &speeds);
+        ui.set_curve_speeds(ModelRc::new(VecModel::from(speeds)));
+        ui.set_curve_line(line.into());
+        ui.set_curve_fill(fill.into());
+    });
+    let w = ui.as_weak();
     ui.on_apply_curve(move |gpu, m| {
         let speeds = monotonic(m.iter());
         let w = w.clone();
         if let Some(ui) = w.upgrade() {
-            ui.set_curve_speeds(ints(&speeds));
+            let temps: Vec<u8> = ui.get_curve_temps().iter().map(|t| t.clamp(0, 255) as u8).collect();
+            show_curve(&ui, &temps, &speeds);
         }
         std::thread::spawn(move || {
             let r = kestrel_core::transport::client().and_then(|mut c| c.command(&Request::SetFanCurve { gpu, speeds }));
@@ -447,5 +527,28 @@ mod win {
         ] {
             unsafe { DwmSetWindowAttribute(hwnd, attr, &val as *const u32 as _, 4) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dragging_keeps_curve_rising() {
+        let mut s = vec![20, 30, 40, 50, 60, 70];
+        drag_point(&mut s, 2, 80);
+        assert_eq!(s, vec![20, 30, 80, 80, 80, 80]);
+        drag_point(&mut s, 4, 10);
+        assert_eq!(s, vec![10, 10, 10, 10, 10, 80]);
+    }
+
+    #[test]
+    fn paths_span_the_graph() {
+        let xs = curve_xs(&[40, 60], 2);
+        assert_eq!(xs, vec![0.25, 0.5]);
+        let (line, fill) = curve_paths(&xs, &[30, 90]);
+        assert_eq!(line, "M 0.00 70.00 L 25.00 70.00 L 50.00 10.00 L 100.00 10.00");
+        assert!(fill.ends_with("L 100.00 100.00 L 0 100.00 Z"));
     }
 }
