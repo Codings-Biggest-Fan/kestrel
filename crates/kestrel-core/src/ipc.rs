@@ -12,15 +12,22 @@ const MAX_FRAME: usize = 1 << 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Request {
-    Hello { protocol: u32 },
+    Hello {
+        protocol: u32,
+    },
     GetStatus,
     SetScenario(Scenario),
     SetCoolerBoost(bool),
     SetChargeLimit(u8),
     SetKbdBacklight(u8),
-    GetFanCurve { gpu: bool },
+    GetFanCurve {
+        gpu: bool,
+    },
     /// Speeds only, one per curve point; also switches the EC to its advanced (curve) fan mode.
-    SetFanCurve { gpu: bool, speeds: Vec<u8> },
+    SetFanCurve {
+        gpu: bool,
+        speeds: Vec<u8>,
+    },
     /// Put every register Kestrel changed back to its original value.
     RestoreDefaults,
 }
@@ -79,7 +86,10 @@ pub struct Status {
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {
     let body = serde_json::to_vec(msg).map_err(io::Error::other)?;
     if body.len() > MAX_FRAME {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "frame too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "frame too large",
+        ));
     }
     let mut buf = Vec::with_capacity(4 + body.len());
     buf.extend_from_slice(&(body.len() as u32).to_le_bytes());
@@ -93,7 +103,10 @@ pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> io::Result<T> {
     r.read_exact(&mut len)?;
     let len = u32::from_le_bytes(len) as usize;
     if len > MAX_FRAME {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "frame too large",
+        ));
     }
     let mut body = vec![0u8; len];
     r.read_exact(&mut body)?;
@@ -108,7 +121,12 @@ pub struct Client<S: Read + Write> {
 
 impl<S: Read + Write> Client<S> {
     pub fn handshake(mut stream: S) -> io::Result<Self> {
-        write_frame(&mut stream, &Request::Hello { protocol: PROTOCOL_VERSION })?;
+        write_frame(
+            &mut stream,
+            &Request::Hello {
+                protocol: PROTOCOL_VERSION,
+            },
+        )?;
         match read_frame(&mut stream)? {
             Response::Hello { protocol, version } if protocol == PROTOCOL_VERSION => {
                 Ok(Self { stream, server_version: version })

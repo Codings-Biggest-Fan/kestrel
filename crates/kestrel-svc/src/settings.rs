@@ -16,7 +16,9 @@ pub fn data_dir() -> PathBuf {
     }
     #[cfg(windows)]
     {
-        let base = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| r"C:\ProgramData".into());
+        let base = std::env::var_os("ProgramData")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| r"C:\ProgramData".into());
         base.join("Kestrel")
     }
     #[cfg(not(windows))]

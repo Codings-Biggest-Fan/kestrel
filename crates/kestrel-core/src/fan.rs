@@ -31,11 +31,15 @@ impl FanCurve {
     }
 
     pub fn balanced() -> Self {
-        Self { points: vec![(40, 0), (55, 30), (65, 45), (75, 65), (85, 85), (90, 100)] }
+        Self {
+            points: vec![(40, 0), (55, 30), (65, 45), (75, 65), (85, 85), (90, 100)],
+        }
     }
 
     pub fn silent() -> Self {
-        Self { points: vec![(50, 0), (65, 25), (75, 40), (85, 70), (90, 100)] }
+        Self {
+            points: vec![(50, 0), (65, 25), (75, 40), (85, 70), (90, 100)],
+        }
     }
 
     /// Duty for `temp`, linearly interpolated; 100 % at or above the failsafe.

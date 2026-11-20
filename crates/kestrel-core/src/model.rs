@@ -145,11 +145,17 @@ pub struct ModelDb {
 
 impl ModelDb {
     pub fn embedded() -> Self {
-        Self::from_sources(EMBEDDED_MODELS.iter().copied()).expect("embedded model database is valid")
+        Self::from_sources(EMBEDDED_MODELS.iter().copied())
+            .expect("embedded model database is valid")
     }
 
-    pub fn from_sources<'a>(sources: impl IntoIterator<Item = &'a str>) -> Result<Self, toml::de::Error> {
-        let confs = sources.into_iter().map(toml::from_str).collect::<Result<_, _>>()?;
+    pub fn from_sources<'a>(
+        sources: impl IntoIterator<Item = &'a str>,
+    ) -> Result<Self, toml::de::Error> {
+        let confs = sources
+            .into_iter()
+            .map(toml::from_str)
+            .collect::<Result<_, _>>()?;
         Ok(Self { confs })
     }
 
@@ -216,7 +222,10 @@ mod tests {
 
     #[test]
     fn generated_maps_are_experimental() {
-        assert_eq!(ModelDb::embedded().find("17S1IMS1.114").unwrap().conf.tier, Tier::Experimental);
+        assert_eq!(
+            ModelDb::embedded().find("17S1IMS1.114").unwrap().conf.tier,
+            Tier::Experimental
+        );
     }
 
     #[test]

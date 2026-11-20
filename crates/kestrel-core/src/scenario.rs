@@ -11,7 +11,12 @@ pub enum Scenario {
 }
 
 impl Scenario {
-    pub const ALL: [Scenario; 4] = [Scenario::Extreme, Scenario::Balanced, Scenario::Silent, Scenario::SuperBattery];
+    pub const ALL: [Scenario; 4] = [
+        Scenario::Extreme,
+        Scenario::Balanced,
+        Scenario::Silent,
+        Scenario::SuperBattery,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {

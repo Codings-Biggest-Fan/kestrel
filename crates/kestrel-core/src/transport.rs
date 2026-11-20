@@ -9,8 +9,8 @@ mod imp {
     use std::os::windows::io::FromRawHandle;
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::{
-        GetLastError, LocalFree, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GENERIC_READ, GENERIC_WRITE,
-        INVALID_HANDLE_VALUE,
+        GetLastError, LocalFree, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GENERIC_READ,
+        GENERIC_WRITE, INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -20,8 +20,8 @@ mod imp {
         CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
     };
     use windows_sys::Win32::System::Pipes::{
-        ConnectNamedPipe, CreateNamedPipeW, WaitNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
-        PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+        ConnectNamedPipe, CreateNamedPipeW, WaitNamedPipeW, PIPE_READMODE_BYTE,
+        PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
     };
 
     pub const PIPE_NAME: &str = r"\\.\pipe\kestrel-svc";
@@ -47,7 +47,12 @@ mod imp {
             let mut sd: PSECURITY_DESCRIPTOR = null_mut();
             let sddl = wide(PIPE_SDDL);
             let ok = unsafe {
-                ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, null_mut())
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl.as_ptr(),
+                    SDDL_REVISION_1,
+                    &mut sd,
+                    null_mut(),
+                )
             };
             if ok == 0 {
                 return Err(io::Error::last_os_error());
@@ -103,7 +108,15 @@ mod imp {
         let name = wide(PIPE_NAME);
         for _ in 0..3 {
             let h = unsafe {
-                CreateFileW(name.as_ptr(), GENERIC_READ | GENERIC_WRITE, 0, null_mut(), OPEN_EXISTING, 0, null_mut())
+                CreateFileW(
+                    name.as_ptr(),
+                    GENERIC_READ | GENERIC_WRITE,
+                    0,
+                    null_mut(),
+                    OPEN_EXISTING,
+                    0,
+                    null_mut(),
+                )
             };
             if h != INVALID_HANDLE_VALUE {
                 return Ok(unsafe { File::from_raw_handle(h as _) });
@@ -113,7 +126,10 @@ mod imp {
             }
             unsafe { WaitNamedPipeW(name.as_ptr(), 1000) };
         }
-        Err(io::Error::new(io::ErrorKind::TimedOut, "kestrel-svc pipe busy"))
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "kestrel-svc pipe busy",
+        ))
     }
 }
 

@@ -1,6 +1,6 @@
 # Kestrel
 
-Lightweight open-source control center for MSI laptops: scenarios, fans, battery, keyboard
+Lightweight open-source control center for MSI laptops (and, experimentally, GIGABYTE AORUS/AERO): scenarios, fans, battery, keyboard
 lighting and monitoring. Native Rust + Slint, no .NET, no WebView. Budget: under 50 MB RAM with
 every window open.
 
@@ -12,7 +12,7 @@ Step-by-step guide (download, running PowerShell as administrator, first run, un
 
 | Binary | Role | Runs |
 |---|---|---|
-| `kestrel-svc` | Only process that touches the EC (MSI ACPI-WMI). Sensors, scenarios, journal. | Windows service, LocalSystem |
+| `kestrel-svc` | Only process that touches hardware (MSI ACPI-WMI EC, GIGABYTE `GB_WMIACPI`). Sensors, scenarios, journal. | Windows service, LocalSystem |
 | `kestrel-tray` | Tray icon: scenario menu, Cooler Boost, opens the window. Plain Win32. | Per user, at login |
 | `kestrel-ui` | Main window. Exits fully when closed. | On demand |
 | `kestrel-updater` | Signed GitHub Releases updates (Ed25519 manifest + SHA-256). | Library + `kestrel-sign` release tool |
@@ -37,7 +37,7 @@ cargo build --release --workspace          # on Windows
 kestrel-svc install                         # admin: registers and starts the service
 ```
 
-Development without MSI hardware: `kestrel-svc --mock 15MMIMS1.103`, then run `kestrel-ui`.
+Development without hardware: `kestrel-svc --mock 15MMIMS1.103` (MSI) or `kestrel-svc --mock gigabyte`, then run `kestrel-ui`.
 On Linux, install `libfontconfig1-dev libxkbcommon-dev` first.
 
 ## Releases

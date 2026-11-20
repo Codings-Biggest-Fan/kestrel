@@ -15,14 +15,16 @@ const HISTORY: usize = 60;
 fn hint(s: Scenario) -> &'static str {
     match s {
         Scenario::Extreme => "Highest power limits and fan speeds",
-        Scenario::Balanced => "MSI's default: performance with sensible noise",
+        Scenario::Balanced => "Firmware default: performance with sensible noise",
         Scenario::Silent => "Lower power, quieter fans",
         Scenario::SuperBattery => "Lowest power draw for the longest battery life",
     }
 }
 
 fn opt<T: std::fmt::Display>(v: Option<T>, unit: &str) -> SharedString {
-    v.map(|v| format!("{v}{unit}")).unwrap_or_else(|| "–".into()).into()
+    v.map(|v| format!("{v}{unit}"))
+        .unwrap_or_else(|| "–".into())
+        .into()
 }
 
 fn fan(rpm: Option<u32>, pct: Option<u8>) -> SharedString {
@@ -57,7 +59,11 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
         ui.set_message(SharedString::new());
     }
     ui.set_connected(true);
-    ui.set_model_name(if s.model.name.is_empty() { "MSI laptop".into() } else { s.model.name.clone().into() });
+    ui.set_model_name(if s.model.name.is_empty() {
+        "Laptop".into()
+    } else {
+        s.model.name.clone().into()
+    });
     ui.set_firmware(s.model.firmware.clone().into());
     ui.set_read_only(s.model.read_only);
     ui.set_supported(s.model.map_id.is_some());
@@ -72,11 +78,33 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     ui.set_cpu_arc(arc(s.cpu_temp.unwrap_or(0) as f32 / 100.0));
     ui.set_gpu_arc(arc(s.gpu_temp.unwrap_or(0) as f32 / 100.0));
     ui.set_load_arc(arc(s.cpu_load_pct / 100.0));
-    ui.set_ram_arc(arc(if s.ram_total_mb > 0 { s.ram_used_mb as f32 / s.ram_total_mb as f32 } else { 0.0 }));
-    ui.set_ram(format!("{:.1} of {:.0} GB", s.ram_used_mb as f32 / 1024.0, s.ram_total_mb as f32 / 1024.0).into());
-    ui.set_ram_f(if s.ram_total_mb > 0 { s.ram_used_mb as f32 / s.ram_total_mb as f32 } else { 0.0 });
+    ui.set_ram_arc(arc(if s.ram_total_mb > 0 {
+        s.ram_used_mb as f32 / s.ram_total_mb as f32
+    } else {
+        0.0
+    }));
+    ui.set_ram(
+        format!(
+            "{:.1} of {:.0} GB",
+            s.ram_used_mb as f32 / 1024.0,
+            s.ram_total_mb as f32 / 1024.0
+        )
+        .into(),
+    );
+    ui.set_ram_f(if s.ram_total_mb > 0 {
+        s.ram_used_mb as f32 / s.ram_total_mb as f32
+    } else {
+        0.0
+    });
     ui.set_battery(opt(s.battery_pct, "%"));
-    ui.set_power_source(match s.on_ac { Some(true) => "Plugged in", Some(false) => "On battery", None => "Unknown" }.into());
+    ui.set_power_source(
+        match s.on_ac {
+            Some(true) => "Plugged in",
+            Some(false) => "On battery",
+            None => "Unknown",
+        }
+        .into(),
+    );
     ui.set_has_boost(s.caps.cooler_boost);
     if s.caps.fan_curve && !ui.get_has_curve() {
         ui.invoke_load_curve(ui.get_curve_gpu());
@@ -105,7 +133,10 @@ fn poll(weak: Weak<AppWindow>) {
         }
         if let Some(s) = &status {
             // A missing reading is skipped, not plotted as 0 °C.
-            for (q, v) in [(&mut temps, s.cpu_temp.map(|t| t as f32 / 100.0)), (&mut loads, Some(s.cpu_load_pct / 100.0))] {
+            for (q, v) in [
+                (&mut temps, s.cpu_temp.map(|t| t as f32 / 100.0)),
+                (&mut loads, Some(s.cpu_load_pct / 100.0)),
+            ] {
                 let Some(v) = v else { continue };
                 if q.len() == HISTORY {
                     q.pop_front();
@@ -139,7 +170,9 @@ fn send(weak: Weak<AppWindow>, req: Request) {
 }
 
 fn ints(v: &[u8]) -> ModelRc<i32> {
-    ModelRc::new(VecModel::from(v.iter().map(|&x| i32::from(x)).collect::<Vec<_>>()))
+    ModelRc::new(VecModel::from(
+        v.iter().map(|&x| i32::from(x)).collect::<Vec<_>>(),
+    ))
 }
 
 static CURVE_GEN: AtomicU64 = AtomicU64::new(0);
@@ -149,7 +182,8 @@ static CURVE_GEN: AtomicU64 = AtomicU64::new(0);
 fn load_curve(weak: Weak<AppWindow>, gpu: bool) {
     let generation = CURVE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
-        let r = kestrel_core::transport::client().and_then(|mut c| c.call(&Request::GetFanCurve { gpu }));
+        let r = kestrel_core::transport::client()
+            .and_then(|mut c| c.call(&Request::GetFanCurve { gpu }));
         let _ = weak.upgrade_in_event_loop(move |ui| match r {
             _ if CURVE_GEN.load(Ordering::SeqCst) != generation || ui.get_curve_gpu() != gpu => {}
             Ok(Response::FanCurve { temps, speeds }) => {
@@ -177,8 +211,13 @@ fn monotonic(speeds: impl Iterator<Item = i32>) -> Vec<u8> {
 
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
-    let items: Vec<ScenarioItem> =
-        Scenario::ALL.iter().map(|&s| ScenarioItem { label: s.label().into(), hint: hint(s).into() }).collect();
+    let items: Vec<ScenarioItem> = Scenario::ALL
+        .iter()
+        .map(|&s| ScenarioItem {
+            label: s.label().into(),
+            hint: hint(s).into(),
+        })
+        .collect();
     ui.set_scenarios(ModelRc::new(VecModel::from(items)));
     ui.set_track(arc(1.0));
 
@@ -206,7 +245,8 @@ fn main() -> Result<(), slint::PlatformError> {
             ui.set_curve_speeds(ints(&speeds));
         }
         std::thread::spawn(move || {
-            let r = kestrel_core::transport::client().and_then(|mut c| c.command(&Request::SetFanCurve { gpu, speeds }));
+            let r = kestrel_core::transport::client()
+                .and_then(|mut c| c.command(&Request::SetFanCurve { gpu, speeds }));
             let msg: SharedString = r.err().map(|e| e.to_string()).unwrap_or_default().into();
             let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
             load_curve(w, gpu);
@@ -214,7 +254,11 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     let w = ui.as_weak();
-    std::thread::Builder::new().name("poll".into()).stack_size(256 * 1024).spawn(move || poll(w)).ok();
+    std::thread::Builder::new()
+        .name("poll".into())
+        .stack_size(256 * 1024)
+        .spawn(move || poll(w))
+        .ok();
     ui.show()?;
     #[cfg(windows)]
     win::style_title_bar(&ui);
@@ -237,8 +281,12 @@ mod win {
     pub fn style_title_bar(ui: &super::AppWindow) {
         use slint::ComponentHandle;
         let handle = ui.window().window_handle();
-        let Ok(h) = handle.window_handle() else { return };
-        let RawWindowHandle::Win32(h) = h.as_raw() else { return };
+        let Ok(h) = handle.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(h) = h.as_raw() else {
+            return;
+        };
         let hwnd = h.hwnd.get() as _;
         for (attr, val) in [
             (DWMWA_USE_IMMERSIVE_DARK_MODE, 1u32),

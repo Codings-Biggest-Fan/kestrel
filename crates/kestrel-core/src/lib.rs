@@ -2,8 +2,10 @@
 
 pub mod ec;
 pub mod fan;
+pub mod gigabyte;
 pub mod ipc;
 pub mod journal;
+pub mod laptop;
 pub mod model;
 pub mod scenario;
 pub mod transport;
