@@ -295,6 +295,9 @@ impl Laptop for Gigabyte {
     }
 
     fn restore(&mut self) -> Result<usize> {
+        if self.read_only {
+            return Err(EcError::ReadOnly);
+        }
         let entries: Vec<(String, u32)> = self
             .journal
             .named_entries()
