@@ -1,0 +1,13 @@
+[package]
+name = "kestrel-cli"
+description = "Kestrel command line: scripting scenarios, Cooler Boost and profiles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "kestrel"
+path = "src/main.rs"
+
+[dependencies]
+kestrel-core.workspace = true
