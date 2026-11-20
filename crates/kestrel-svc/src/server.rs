@@ -115,6 +115,9 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
     match req {
         Request::Hello { .. } => Response::Hello { protocol: PROTOCOL_VERSION, version: kestrel_core::VERSION.into() },
         Request::GetStatus => Response::Status(Box::new(status(st))),
+        Request::RestoreDefaults if st.model.firmware_changed => {
+            Response::Error("Confirm the new EC firmware in Settings before restoring saved values.".into())
+        }
         Request::ConfirmFirmware => {
             if !st.model.firmware_changed {
                 return Response::Ok;

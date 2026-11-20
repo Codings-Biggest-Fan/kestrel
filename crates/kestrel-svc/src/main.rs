@@ -106,11 +106,13 @@ fn init(mock_fw: Option<String>) -> State {
                     model.map_id = Some(m.conf.id.clone());
                     model.wmi = Some(m.conf.wmi);
                     // A BIOS/EC update can move registers even when the prefix still matches.
-                    let changed = allowed && settings.known_firmware.as_deref().is_some_and(|k| k != fw);
+                    let mut changed = allowed && settings.known_firmware.as_deref().is_some_and(|k| k != fw);
                     if allowed && settings.known_firmware.is_none() {
                         settings.known_firmware = Some(fw.clone());
                         if let Err(e) = settings.save() {
+                            // Without a saved baseline a later update would go unnoticed.
                             eprintln!("couldn't save settings: {e}");
+                            changed = true;
                         }
                     }
                     if changed {
