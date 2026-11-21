@@ -214,6 +214,10 @@ impl Laptop for Gigabyte {
 
     fn set_cooler_boost(&mut self, on: bool) -> Result<()> {
         if !on {
+            // Only leave Fixed mode; another mode (Gaming, Quiet, Custom) is not boost.
+            if self.fan_mode()? != FanMode::Fixed {
+                return Ok(());
+            }
             return self.set_fan_mode(FanMode::Normal);
         }
         self.set_fan_mode(FanMode::Fixed)?;
@@ -514,6 +518,14 @@ mod tests {
         assert_eq!(g.charge_limit().unwrap(), Some(80));
         g.set_charge_limit(100).unwrap();
         assert_eq!(g.charge_limit().unwrap(), Some(100));
+    }
+
+    #[test]
+    fn boost_off_keeps_other_fan_modes() {
+        let mut g = gb(false);
+        g.apply_scenario(Scenario::Extreme).unwrap();
+        g.set_cooler_boost(false).unwrap();
+        assert_eq!(g.fan_mode().unwrap(), FanMode::Gaming);
     }
 
     #[test]
