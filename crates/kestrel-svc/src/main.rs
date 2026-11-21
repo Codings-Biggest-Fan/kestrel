@@ -4,22 +4,27 @@
 //!   kestrel-svc                    run as a Windows service (started by the SCM)
 //!   kestrel-svc --console          run in the foreground
 //!   kestrel-svc --mock <FW_ID>     foreground with an in-memory EC (development, CI)
+//!   kestrel-svc --mock gigabyte    foreground with an in-memory GIGABYTE WMI interface
 //!   kestrel-svc install|uninstall  register / remove the Windows service
 
 mod cpu_power;
 mod drivers;
 mod lighting;
 mod server;
+#[cfg(windows)]
+mod service;
 mod settings;
 mod sysinfo;
 #[cfg(windows)]
-mod service;
-#[cfg(windows)]
 mod wmi_ec;
+#[cfg(windows)]
+mod wmi_gb;
 
 use kestrel_core::ec::{read_firmware_id, EcIo, MockEc, MsiEc};
+use kestrel_core::gigabyte::{GbIo, Gigabyte, MockGb};
 use kestrel_core::ipc::ModelInfo;
 use kestrel_core::journal::Journal;
+use kestrel_core::laptop::Laptop;
 use kestrel_core::model::{ModelDb, Tier};
 use server::State;
 use std::sync::{Arc, Mutex};
@@ -30,7 +35,11 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
         Some("--console") => run(None),
-        Some("--mock") => run(Some(args.get(1).cloned().unwrap_or_else(|| "15MMIMS1.103".into()))),
+        Some("--mock") => run(Some(
+            args.get(1)
+                .cloned()
+                .unwrap_or_else(|| "15MMIMS1.103".into()),
+        )),
         #[cfg(windows)]
         Some("install") => service::install(),
         #[cfg(windows)]
@@ -55,7 +64,10 @@ pub fn run(mock_fw: Option<String>) -> Result<(), String> {
         let st = state.lock().unwrap();
         eprintln!(
             "kestrel-svc {}: firmware {:?} map {:?} read_only={}",
-            kestrel_core::VERSION, st.model.firmware, st.model.map_id, st.model.read_only
+            kestrel_core::VERSION,
+            st.model.firmware,
+            st.model.map_id,
+            st.model.read_only
         );
     }
     server::serve(state).map_err(|e| e.to_string())
@@ -73,7 +85,10 @@ fn open_backend(mock_fw: Option<String>) -> Result<(Box<dyn EcIo>, String), Stri
         io.regs[0x80] = 47;
         io.regs[0xc9] = 0xc8;
         io.regs[0xcb] = 0xd2;
-        for (i, (t, sp)) in [(50, 0), (58, 30), (65, 45), (72, 60), (80, 75), (88, 90)].into_iter().enumerate() {
+        for (i, (t, sp)) in [(50, 0), (58, 30), (65, 45), (72, 60), (80, 75), (88, 90)]
+            .into_iter()
+            .enumerate()
+        {
             io.regs[0x69 + i] = t;
             io.regs[0x72 + i] = sp;
             io.regs[0x81 + i] = t - 5;
@@ -94,19 +109,27 @@ fn open_backend(mock_fw: Option<String>) -> Result<(Box<dyn EcIo>, String), Stri
 
 fn init(mock_fw: Option<String>) -> State {
     let mut settings = settings::Settings::load();
-    let mut model = ModelInfo { read_only: true, ..Default::default() };
+    if let Some((io, ident)) = open_gigabyte(mock_fw.as_deref()) {
+        return init_gigabyte(&settings, io, ident, mock_fw.is_some());
+    }
+    let mut model = ModelInfo {
+        read_only: true,
+        ..Default::default()
+    };
     let ec = match open_backend(mock_fw) {
         Ok((io, fw)) => {
             model.firmware = fw.clone();
             let db = ModelDb::embedded();
             match db.find(&fw) {
                 Some(m) => {
-                    let allowed = m.conf.tier == Tier::Tested || settings.allows_experimental(&m.firmware.prefix);
+                    let allowed = m.conf.tier == Tier::Tested
+                        || settings.allows_experimental(&m.firmware.prefix);
                     model.name = m.firmware.models.clone();
                     model.map_id = Some(m.conf.id.clone());
                     model.wmi = Some(m.conf.wmi);
                     // A BIOS/EC update can move registers even when the prefix still matches.
-                    let mut changed = allowed && settings.known_firmware.as_deref().is_some_and(|k| k != fw);
+                    let mut changed =
+                        allowed && settings.known_firmware.as_deref().is_some_and(|k| k != fw);
                     if allowed && settings.known_firmware.is_none() {
                         settings.known_firmware = Some(fw.clone());
                         if let Err(e) = settings.save() {
@@ -116,12 +139,18 @@ fn init(mock_fw: Option<String>) -> State {
                         }
                     }
                     if changed {
-                        eprintln!("EC firmware changed since it was confirmed; read-only until confirmed");
+                        eprintln!(
+                            "EC firmware changed since it was confirmed; read-only until confirmed"
+                        );
                     }
                     model.firmware_changed = changed;
                     model.read_only = !allowed || changed;
-                    let journal = Journal::open(settings::data_dir().join("journal.json")).unwrap_or_default();
-                    Some(MsiEc::new(io, m.conf.clone(), journal, model.read_only))
+                    let journal = Journal::open(settings::data_dir().join("journal.json"))
+                        .unwrap_or_default();
+                    Some(
+                        Box::new(MsiEc::new(io, m.conf.clone(), journal, model.read_only))
+                            as Box<dyn Laptop>,
+                    )
                 }
                 None => {
                     model.name = "Unknown model".into();
@@ -134,5 +163,73 @@ fn init(mock_fw: Option<String>) -> State {
             None
         }
     };
-    State { ec, model, scenario: None, sampler: Default::default() }
+    State {
+        ec,
+        model,
+        scenario: None,
+        sampler: Default::default(),
+    }
+}
+
+/// A GIGABYTE WMI interface, if this is a GIGABYTE laptop (or `--mock gigabyte`), with
+/// its (model, SKU).
+fn open_gigabyte(mock: Option<&str>) -> Option<(Box<dyn GbIo>, (String, String))> {
+    match mock {
+        Some(m) if m.eq_ignore_ascii_case("gigabyte") => {
+            return Some((
+                Box::new(MockGb::default()),
+                ("AORUS 16X (mock)".into(), "AORUS16X".into()),
+            ))
+        }
+        Some(_) => return None,
+        None => {}
+    }
+    #[cfg(windows)]
+    {
+        let (maker, model, sku) = wmi_gb::system_identity().ok()?;
+        if !maker.to_ascii_uppercase().contains("GIGABYTE") {
+            return None;
+        }
+        match wmi_gb::WmiGb::open() {
+            Ok(io) => Some((Box::new(io), (model, sku))),
+            Err(e) => {
+                eprintln!("GIGABYTE laptop without a usable WMI interface: {e}");
+                None
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+fn init_gigabyte(
+    settings: &settings::Settings,
+    io: Box<dyn GbIo>,
+    (name, sku): (String, String),
+    mock: bool,
+) -> State {
+    // No GIGABYTE model is confirmed on owner hardware yet: read-only until opted in.
+    let key = format!("GIGABYTE:{sku}");
+    let allowed = settings.allows_experimental(&key);
+    let model = ModelInfo {
+        firmware: key,
+        name,
+        map_id: Some("gigabyte-wmi".into()),
+        wmi: None,
+        read_only: !allowed,
+        ..Default::default()
+    };
+    // A mock must never leave simulated values in the real hardware journal.
+    let journal = if mock {
+        Journal::in_memory()
+    } else {
+        Journal::open(settings::data_dir().join("journal-gigabyte.json")).unwrap_or_default()
+    };
+    let ec: Box<dyn Laptop> = Box::new(Gigabyte::new(io, journal, !allowed));
+    State {
+        ec: Some(ec),
+        model,
+        scenario: None,
+        sampler: Default::default(),
+    }
 }

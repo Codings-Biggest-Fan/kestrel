@@ -5,39 +5,88 @@ use kestrel_core::ec::{EcError, EcIo, Result};
 use std::mem::ManuallyDrop;
 use windows::core::{Interface, BSTR, PCWSTR};
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoSetProxyBlanket, CLSCTX_INPROC_SERVER,
-    COINIT_MULTITHREADED, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
-    SAFEARRAY,
+    CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoSetProxyBlanket,
+    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL,
+    RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, SAFEARRAY,
 };
-use windows::Win32::System::Ole::{SafeArrayAccessData, SafeArrayCreateVector, SafeArrayGetUBound, SafeArrayUnaccessData};
+use windows::Win32::System::Ole::{
+    SafeArrayAccessData, SafeArrayCreateVector, SafeArrayGetUBound, SafeArrayUnaccessData,
+};
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
-use windows::Win32::System::Variant::{VariantClear, VARIANT, VT_ARRAY, VT_BSTR, VT_UI1, VT_UNKNOWN};
+use windows::Win32::System::Variant::{
+    VariantClear, VARIANT, VT_ARRAY, VT_BSTR, VT_UI1, VT_UNKNOWN,
+};
 use windows::Win32::System::Wmi::{
-    IWbemClassObject, IWbemLocator, IWbemServices, WbemLocator, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY,
-    WBEM_GENERIC_FLAG_TYPE, WBEM_INFINITE,
+    IWbemClassObject, IWbemLocator, IWbemServices, WbemLocator, WBEM_FLAG_FORWARD_ONLY,
+    WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_GENERIC_FLAG_TYPE, WBEM_INFINITE,
 };
 
 const WBEM_E_ACCESS_DENIED: u32 = 0x8004_1003;
 const E_ACCESSDENIED: u32 = 0x8007_0005;
 
-fn hr_err(code: u32, what: &str) -> EcError {
+pub(crate) fn hr_err(code: u32, what: &str) -> EcError {
     match code {
-        WBEM_E_ACCESS_DENIED | E_ACCESSDENIED => {
-            EcError::Io("MSI_ACPI access denied: run kestrel-svc as administrator (or install it as a service)".into())
-        }
+        WBEM_E_ACCESS_DENIED | E_ACCESSDENIED => EcError::Io(
+            "MSI_ACPI access denied: run kestrel-svc as administrator (or install it as a service)"
+                .into(),
+        ),
         _ => EcError::Io(format!("WMI {what}: 0x{code:08x}")),
     }
 }
 
-fn err(e: windows::core::Error) -> EcError {
+pub(crate) fn err(e: windows::core::Error) -> EcError {
     match e.code().0 as u32 {
         WBEM_E_ACCESS_DENIED | E_ACCESSDENIED => hr_err(e.code().0 as u32, ""),
         _ => EcError::Io(format!("WMI: {e}")),
     }
 }
 
-fn w(s: &str) -> Vec<u16> {
+pub(crate) fn w(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
+}
+
+/// Connect to a WMI namespace with impersonation (COM is initialised on first use).
+pub(crate) fn connect(namespace: &str) -> Result<IWbemServices> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        // Fails harmlessly if the process already set security.
+        let _ = CoInitializeSecurity(
+            None,
+            -1,
+            None,
+            None,
+            RPC_C_AUTHN_LEVEL_DEFAULT,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+            None,
+        );
+        let loc: IWbemLocator =
+            CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER).map_err(err)?;
+        let svc = loc
+            .ConnectServer(
+                &BSTR::from(namespace),
+                &BSTR::new(),
+                &BSTR::new(),
+                &BSTR::new(),
+                0,
+                &BSTR::new(),
+                None,
+            )
+            .map_err(err)?;
+        CoSetProxyBlanket(
+            &svc,
+            RPC_C_AUTHN_WINNT,
+            RPC_C_AUTHZ_NONE,
+            None,
+            RPC_C_AUTHN_LEVEL_CALL,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+        )
+        .map_err(err)?;
+        Ok(svc)
+    }
 }
 
 pub struct WmiEc {
@@ -53,34 +102,7 @@ unsafe impl Send for WmiEc {}
 impl WmiEc {
     pub fn open() -> Result<Self> {
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            // Fails harmlessly if the process already set security.
-            let _ = CoInitializeSecurity(
-                None,
-                -1,
-                None,
-                None,
-                RPC_C_AUTHN_LEVEL_DEFAULT,
-                RPC_C_IMP_LEVEL_IMPERSONATE,
-                None,
-                EOAC_NONE,
-                None,
-            );
-            let loc: IWbemLocator = CoCreateInstance(&WbemLocator, None, CLSCTX_INPROC_SERVER).map_err(err)?;
-            let svc = loc
-                .ConnectServer(&BSTR::from(r"root\wmi"), &BSTR::new(), &BSTR::new(), &BSTR::new(), 0, &BSTR::new(), None)
-                .map_err(err)?;
-            CoSetProxyBlanket(
-                &svc,
-                RPC_C_AUTHN_WINNT,
-                RPC_C_AUTHZ_NONE,
-                None,
-                RPC_C_AUTHN_LEVEL_CALL,
-                RPC_C_IMP_LEVEL_IMPERSONATE,
-                None,
-                EOAC_NONE,
-            )
-            .map_err(err)?;
+            let svc = connect(r"root\wmi")?;
 
             let en = svc
                 .ExecQuery(
@@ -98,16 +120,31 @@ impl WmiEc {
             }
             let inst = objs[0].take().ok_or_else(|| {
                 // 0x80041010 = class not registered (BIOS MOF missing); S_FALSE (0x1) = class with no instance.
-                EcError::Io(format!("MSI_ACPI: no instance in root\\wmi (Next returned 0x{:08x}, {n} objects)", hr.0 as u32))
+                EcError::Io(format!(
+                    "MSI_ACPI: no instance in root\\wmi (Next returned 0x{:08x}, {n} objects)",
+                    hr.0 as u32
+                ))
             })?;
             let path = get_bstr(&inst, "__PATH")?;
 
             let mut acpi_class = None;
-            svc.GetObject(&BSTR::from("MSI_ACPI"), WBEM_GENERIC_FLAG_TYPE(0), None, Some(&mut acpi_class), None)
-                .map_err(err)?;
+            svc.GetObject(
+                &BSTR::from("MSI_ACPI"),
+                WBEM_GENERIC_FLAG_TYPE(0),
+                None,
+                Some(&mut acpi_class),
+                None,
+            )
+            .map_err(err)?;
             let mut pkg_class = None;
-            svc.GetObject(&BSTR::from("Package_32"), WBEM_GENERIC_FLAG_TYPE(0), None, Some(&mut pkg_class), None)
-                .map_err(err)?;
+            svc.GetObject(
+                &BSTR::from("Package_32"),
+                WBEM_GENERIC_FLAG_TYPE(0),
+                None,
+                Some(&mut pkg_class),
+                None,
+            )
+            .map_err(err)?;
             Ok(Self {
                 svc,
                 path,
@@ -124,18 +161,27 @@ impl WmiEc {
                 Some(bytes) => {
                     let mut sig = None;
                     self.acpi_class
-                        .GetMethod(PCWSTR(w(method).as_ptr()), 0, &mut sig, std::ptr::null_mut())
+                        .GetMethod(
+                            PCWSTR(w(method).as_ptr()),
+                            0,
+                            &mut sig,
+                            std::ptr::null_mut(),
+                        )
                         .map_err(err)?;
                     let sig = sig.ok_or(EcError::Unsupported("MSI_ACPI method"))?;
                     let params = sig.SpawnInstance(0).map_err(err)?;
                     let pkg = self.pkg_class.SpawnInstance(0).map_err(err)?;
                     let mut arr = byte_array_variant(&bytes)?;
-                    pkg.Put(PCWSTR(w("Bytes").as_ptr()), 0, &arr, 0).map_err(err)?;
+                    pkg.Put(PCWSTR(w("Bytes").as_ptr()), 0, &arr, 0)
+                        .map_err(err)?;
                     let _ = VariantClear(&mut arr);
                     let mut obj = VARIANT::default();
                     (*obj.Anonymous.Anonymous).vt = VT_UNKNOWN;
-                    (*obj.Anonymous.Anonymous).Anonymous.punkVal = ManuallyDrop::new(Some(pkg.cast().map_err(err)?));
-                    params.Put(PCWSTR(w("Data").as_ptr()), 0, &obj, 0).map_err(err)?;
+                    (*obj.Anonymous.Anonymous).Anonymous.punkVal =
+                        ManuallyDrop::new(Some(pkg.cast().map_err(err)?));
+                    params
+                        .Put(PCWSTR(w("Data").as_ptr()), 0, &obj, 0)
+                        .map_err(err)?;
                     let _ = VariantClear(&mut obj);
                     Some(params)
                 }
@@ -155,7 +201,8 @@ impl WmiEc {
                 .map_err(err)?;
             let out = out.ok_or_else(|| EcError::Io(format!("{method} returned nothing")))?;
             let mut data = VARIANT::default();
-            out.Get(PCWSTR(w("Data").as_ptr()), 0, &mut data, None, None).map_err(err)?;
+            out.Get(PCWSTR(w("Data").as_ptr()), 0, &mut data, None, None)
+                .map_err(err)?;
             let unk = (*data.Anonymous.Anonymous).Anonymous.punkVal.clone();
             let _ = VariantClear(&mut data);
             let pkg: IWbemClassObject = ManuallyDrop::into_inner(unk)
@@ -163,7 +210,8 @@ impl WmiEc {
                 .cast()
                 .map_err(err)?;
             let mut bytes = VARIANT::default();
-            pkg.Get(PCWSTR(w("Bytes").as_ptr()), 0, &mut bytes, None, None).map_err(err)?;
+            pkg.Get(PCWSTR(w("Bytes").as_ptr()), 0, &mut bytes, None, None)
+                .map_err(err)?;
             let v = read_byte_array(&bytes);
             let _ = VariantClear(&mut bytes);
             v
@@ -173,7 +221,13 @@ impl WmiEc {
     /// EC firmware ID via `Get_EC`.
     pub fn firmware_id(&self) -> Result<String> {
         let b = self.call("Get_EC", None)?;
-        let s: String = b.iter().skip(2).take_while(|&&c| c != 0).filter(|c| c.is_ascii_graphic()).map(|&c| c as char).collect();
+        let s: String = b
+            .iter()
+            .skip(2)
+            .take_while(|&&c| c != 0)
+            .filter(|c| c.is_ascii_graphic())
+            .map(|&c| c as char)
+            .collect();
         Ok(s.chars().take(12).collect())
     }
 }
@@ -183,7 +237,9 @@ impl EcIo for WmiEc {
         let mut b = [0u8; 32];
         b[0] = addr;
         let out = self.call("Get_Data", Some(b))?;
-        out.get(1).copied().ok_or_else(|| EcError::Io("Get_Data: short reply".into()))
+        out.get(1)
+            .copied()
+            .ok_or_else(|| EcError::Io("Get_Data: short reply".into()))
     }
 
     fn write(&mut self, addr: u8, value: u8) -> Result<()> {
@@ -194,9 +250,10 @@ impl EcIo for WmiEc {
     }
 }
 
-unsafe fn get_bstr(obj: &IWbemClassObject, name: &str) -> Result<BSTR> {
+pub(crate) unsafe fn get_bstr(obj: &IWbemClassObject, name: &str) -> Result<BSTR> {
     let mut v = VARIANT::default();
-    obj.Get(PCWSTR(w(name).as_ptr()), 0, &mut v, None, None).map_err(err)?;
+    obj.Get(PCWSTR(w(name).as_ptr()), 0, &mut v, None, None)
+        .map_err(err)?;
     if (*v.Anonymous.Anonymous).vt != VT_BSTR {
         let _ = VariantClear(&mut v);
         return Err(EcError::Io(format!("{name} is not a string")));

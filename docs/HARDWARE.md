@@ -37,3 +37,24 @@ Every EC write:
   GPU speeds from 0x8A, 6 points; fan mode `advanced` (0x8D) makes the EC follow them.
 
 Sources: msi-ec (GPL-2.0-or-later), GhostDeck (GPL-3.0), Linux `msi-wmi-platform` docs.
+
+## GIGABYTE AORUS/AERO laptops (experimental)
+
+- Detected when `Win32_ComputerSystem.Manufacturer` contains `GIGABYTE` and `root\wmi` has
+  `GB_WMIACPI_Get` / `GB_WMIACPI_Set` instances (installed by the BIOS, no vendor software needed).
+- Getters return `Data`; setters take `Data` (byte). Fan curve: `GetFanIndexValue(Index)` returns
+  `Temperture` (sic) and `Value`; `SetFanIndexValue(Index, Temperture, Value)`. 15 points, one curve
+  for both fans, duty 0-229.
+- Fan modes are four flags: `SetAutoFanStatus` (Gaming), `SetFixedFanStatus` (Fixed),
+  `SetStepFanStatus` (Custom curve), `SetNvThermalTarget` (Quiet). Kestrel maps Extreme -> Gaming,
+  Balanced -> Normal (all off), Silent/Super Battery -> Quiet, Cooler Boost -> Fixed at 229.
+- Charge limit: `SetChargeStop(60-100)` then `SetChargePolicy(4)`; `SetChargePolicy(0)` charges to 100 %.
+- Sensors: `getCpuTemp`, `getGpuTemp1`, `getRpm1`/`getRpm2` (byte-swapped u16), `GetFanPWMStatus` (0-229).
+- Every write reads the matching getter first, journals it in `journal-gigabyte.json`, reads back
+  and restores on mismatch. Curve writes are all-or-nothing.
+- No GIGABYTE model is confirmed on owner hardware yet, so the backend is read-only until the owner
+  adds `GIGABYTE:<SystemSKUNumber>` to `allow_experimental` in `%ProgramData%\Kestrel\settings.json`.
+
+Sources: AeroCtl (GPL-3.0, method names and argument shapes), gigabyte-laptop-wmi (GPL-2.0-or-later,
+fan modes, 15-point curve, 60-100 % charge range). Develop without hardware with
+`kestrel-svc --mock gigabyte`.
