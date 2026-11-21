@@ -23,6 +23,7 @@ pub enum Request {
     SetFanCurve { gpu: bool, speeds: Vec<u8> },
     /// Put every register Kestrel changed back to its original value.
     RestoreDefaults,
+    SetAudio(crate::creative::AudioSetting),
     ConfirmFirmware,
     SetWebcam(bool),
     /// `true` puts the Win key on the left of the bottom row (Fn on the right).
@@ -127,6 +128,9 @@ pub struct Status {
     pub ram_total_mb: u32,
     pub on_ac: Option<bool>,
     pub battery_pct: Option<u8>,
+    /// A connected Sound Blaster, as it last reported itself.
+    #[serde(default)]
+    pub audio: Option<crate::creative::AudioState>,
     #[serde(default)]
     pub webcam: Option<bool>,
     #[serde(default)]

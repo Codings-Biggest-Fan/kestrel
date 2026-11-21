@@ -122,6 +122,7 @@ component Unsupported inherits Card {
 }
 
 export struct ScenarioItem { label: string, hint: string }
+export struct AudioEffect { label: string, known: bool, on: bool, level: int }
 export struct ProfileItem { name: string, desc: string, preset: bool }
 export struct LightItem { id: string, name: string, kind: string, supported: bool }
 
@@ -245,10 +246,22 @@ export component AppWindow inherits Window {
     callback curve-resize(float, float);
     callback load-curve(bool);
     callback apply-curve(bool, [int]);
+    in property <bool> has-audio;
+    in property <string> audio-name;
+    in property <string> audio-firmware;
+    in property <int> audio-output: -1; // 0 headphones, 1 speakers
+    in property <int> audio-sbx: -1;
+    in property <int> audio-scout: -1;
+    in property <[AudioEffect]> audio-effects;
+    callback set-audio-output(int);
+    callback set-audio-sbx(bool);
+    callback set-audio-scout(bool);
+    callback set-effect-on(int, bool);
+    callback set-effect-level(int, int);
 
     property <int> page: 0;
-    property <[string]> pages: ["Dashboard", "Scenarios", "Fans", "Battery", "Lighting", "Drivers", "Settings"];
-    property <[string]> subtitles: ["Live temperatures, fans and load", "Power and fan profiles", "Cooling and Cooler Boost", "Charging and power source", "Keyboard and RGB devices", "GPU status and driver updates", "Model, firmware and safety"];
+    property <[string]> pages: ["Dashboard", "Scenarios", "Fans", "Battery", "Lighting", "Audio", "Drivers", "Settings"];
+    property <[string]> subtitles: ["Live temperatures, fans and load", "Power and fan profiles", "Cooling and Cooler Boost", "Charging and power source", "Keyboard and RGB devices", "Sound Blaster output and effects", "GPU status and driver updates", "Model, firmware and safety"];
     // Lucide-style 24x24 outline icons.
     property <[string]> icons: [
         "M3 13h8V3H3zM13 21h8V11h-8zM13 3v6h8V3zM3 21h8v-6H3z",
@@ -256,6 +269,7 @@ export component AppWindow inherits Window {
         "M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0M12 10c0-4 1-7 4-7s3 4-2 7M14 12c4 0 7 1 7 4s-4 3-7-2M12 14c0 4-1 7-4 7s-3-4 2-7M10 12c-4 0-7-1-7-4s4-3 7 2",
         "M3 7h15a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM22 11v2M6 10v4M10 10v4",
         "M2 6h20v12H2zM6 10h0M10 10h0M14 10h0M18 10h0M7 14h10",
+        "M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14",
         "M4 7h16v10H4zM8 7V4M12 7V4M16 7V4M8 20v-3M12 20v-3M16 20v-3M8 10h8v4H8z",
         "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
     ];
@@ -478,7 +492,31 @@ export component AppWindow inherits Window {
 
             if page == 5: VerticalLayout {
                 spacing: 16px;
-                Timer { interval: 2s; running: page == 5; triggered => { load-gpu(); } }
+                if !has-audio: Card { title: "SOUND BLASTER";
+                    Text { wrap: word-wrap; color: Theme.muted;
+                        text: "No supported Sound Blaster found. Plug in a Sound BlasterX G6; Kestrel checks when the service starts."; } }
+                if has-audio: Card { title: "OUTPUT";
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 120px; label: "Headphones"; selected: audio-output == 0; clicked => { set-audio-output(0); } }
+                        Pill { width: 120px; label: "Speakers"; selected: audio-output == 1; clicked => { set-audio-output(1); } } }
+                    Text { text: audio-name + " · firmware " + audio-firmware; color: Theme.muted; font-size: 12px; } }
+                if has-audio: Card { title: "PROCESSING";
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 120px; label: "SBX"; selected: audio-sbx == 1; clicked => { set-audio-sbx(audio-sbx != 1); } }
+                        Pill { width: 120px; label: "Scout Mode"; selected: audio-scout == 1; clicked => { set-audio-scout(audio-scout != 1); } } }
+                    for e[i] in audio-effects: HorizontalLayout { spacing: 8px; alignment: start;
+                        Text { width: 110px; text: e.label; color: e.known ? Theme.text : Theme.faint; vertical-alignment: center; }
+                        Pill { width: 64px; label: e.on ? "On" : "Off"; selected: e.on; enabled: e.known; clicked => { set-effect-on(i, !e.on); } }
+                        for v in [25, 50, 75, 100]: Pill { width: 56px; label: v + "%"; selected: e.known && e.level == v; enabled: e.known; clicked => { set-effect-level(i, v); } }
+                        Text { text: e.known ? e.level + "%" : "–"; color: Theme.muted; vertical-alignment: center; } }
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "Shows what the device reports. The front-panel button and knob are picked up within a few seconds."; } }
+                Rectangle {}
+            }
+
+            if page == 6: VerticalLayout {
+                spacing: 16px;
+                Timer { interval: 2s; running: page == 6; triggered => { load-gpu(); } }
                 Card { title: "GRAPHICS";
                     if gpu-name == "": Text { text: gpu-error == "" ? "Reading GPU…" : gpu-error; color: Theme.muted; }
                     if gpu-name != "": VerticalLayout { spacing: 6px;
@@ -501,7 +539,7 @@ export component AppWindow inherits Window {
                 Rectangle {}
             }
 
-            if page == 6: Flickable { VerticalLayout {
+            if page == 7: Flickable { VerticalLayout {
                 spacing: 16px;
                 if has-webcam || has-fn-swap: Card { title: "KEYBOARD AND CAMERA";
                     if has-webcam: HorizontalLayout { spacing: 8px; alignment: start;

@@ -1,7 +1,7 @@
 # Kestrel
 
 Lightweight open-source control center for MSI laptops (and, experimentally, GIGABYTE AORUS/AERO): scenarios, fans, battery, keyboard
-lighting and monitoring. Native Rust + Slint, no .NET, no WebView. Budget: under 50 MB RAM with
+lighting and monitoring, plus Sound BlasterX G6 output and effects. Native Rust + Slint, no .NET, no WebView. Budget: under 50 MB RAM with
 every window open.
 
 ## Screenshots
