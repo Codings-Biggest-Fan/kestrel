@@ -78,73 +78,44 @@ pub struct Release {
 
 /// Compare dotted numeric versions; a leading `v` is ignored.
 pub fn is_newer(candidate: &str, current: &str) -> bool {
-    let parse = |v: &str| -> Vec<u64> {
-        v.trim_start_matches('v')
-            .split(['.', '-'])
-            .map_while(|p| p.parse().ok())
-            .collect()
-    };
+    let parse = |v: &str| -> Vec<u64> { v.trim_start_matches('v').split(['.', '-']).map_while(|p| p.parse().ok()).collect() };
     parse(candidate) > parse(current)
 }
 
 fn get(url: &str) -> Result<Vec<u8>> {
     let resp = ureq::get(url)
-        .set(
-            "User-Agent",
-            concat!("kestrel-updater/", env!("CARGO_PKG_VERSION")),
-        )
+        .set("User-Agent", concat!("kestrel-updater/", env!("CARGO_PKG_VERSION")))
         .set("Accept", "application/vnd.github+json")
         .call()
         .map_err(|e| Error::Http(e.to_string()))?;
     let mut buf = Vec::new();
-    resp.into_reader()
-        .take(MAX_DOWNLOAD)
-        .read_to_end(&mut buf)?;
+    resp.into_reader().take(MAX_DOWNLOAD).read_to_end(&mut buf)?;
     Ok(buf)
 }
 
 /// Latest published release, if newer than this build.
 pub fn check() -> Result<Option<Release>> {
-    let body = get(&format!(
-        "https://api.github.com/repos/{REPO}/releases/latest"
-    ))?;
-    let r: GhRelease =
-        serde_json::from_slice(&body).map_err(|e| Error::BadManifest(e.to_string()))?;
+    let body = get(&format!("https://api.github.com/repos/{REPO}/releases/latest"))?;
+    let r: GhRelease = serde_json::from_slice(&body).map_err(|e| Error::BadManifest(e.to_string()))?;
     let version = r.tag_name.trim_start_matches('v').to_string();
-    Ok(
-        is_newer(&version, kestrel_core::VERSION).then_some(Release {
-            version,
-            assets: r.assets,
-        }),
-    )
+    Ok(is_newer(&version, kestrel_core::VERSION).then_some(Release { version, assets: r.assets }))
 }
 
 pub fn verify_manifest(manifest: &[u8], sig: &[u8], pubkey_hex: &str) -> Result<Manifest> {
-    let key: [u8; 32] = hex(pubkey_hex)
-        .and_then(|k| k.try_into().ok())
-        .ok_or(Error::NoSigningKey)?;
+    let key: [u8; 32] = hex(pubkey_hex).and_then(|k| k.try_into().ok()).ok_or(Error::NoSigningKey)?;
     let key = VerifyingKey::from_bytes(&key).map_err(|_| Error::NoSigningKey)?;
     let sig = Signature::from_slice(sig).map_err(|_| Error::BadSignature)?;
-    key.verify(manifest, &sig)
-        .map_err(|_| Error::BadSignature)?;
+    key.verify(manifest, &sig).map_err(|_| Error::BadSignature)?;
     serde_json::from_slice(manifest).map_err(|e| Error::BadManifest(e.to_string()))
 }
 
 fn hex(s: &str) -> Option<Vec<u8>> {
     let s = s.trim();
-    s.len().is_multiple_of(2).then(|| {
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
-            .collect()
-    })?
+    s.len().is_multiple_of(2).then(|| (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect())?
 }
 
 pub fn sha256_hex(data: &[u8]) -> String {
-    Sha256::digest(data)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Download, verify and stage a release in `dir/<version>`. Returns the staged directory.
@@ -161,9 +132,7 @@ pub fn stage(rel: &Release, dir: &Path) -> Result<PathBuf> {
     let sig = get(&url("manifest.json.sig")?)?;
     let manifest = verify_manifest(&manifest_bytes, &sig, pubkey)?;
     if manifest.version != rel.version {
-        return Err(Error::BadManifest(
-            "manifest version differs from the release tag".into(),
-        ));
+        return Err(Error::BadManifest("manifest version differs from the release tag".into()));
     }
     let out = dir.join(&manifest.version);
     std::fs::create_dir_all(&out)?;
@@ -187,12 +156,7 @@ mod tests {
 
     fn keypair() -> (SigningKey, String) {
         let sk = SigningKey::from_bytes(&[7u8; 32]);
-        let pk = sk
-            .verifying_key()
-            .to_bytes()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let pk = sk.verifying_key().to_bytes().iter().map(|b| format!("{b:02x}")).collect();
         (sk, pk)
     }
 
@@ -216,17 +180,11 @@ mod tests {
     fn tampered_manifest_is_rejected() {
         let (sk, pk) = keypair();
         let sig = sk.sign(br#"{"version":"0.2.0","files":[]}"#).to_bytes();
-        assert!(matches!(
-            verify_manifest(br#"{"version":"6.6.6","files":[]}"#, &sig, &pk),
-            Err(Error::BadSignature)
-        ));
+        assert!(matches!(verify_manifest(br#"{"version":"6.6.6","files":[]}"#, &sig, &pk), Err(Error::BadSignature)));
     }
 
     #[test]
     fn sha256() {
-        assert_eq!(
-            sha256_hex(b"abc"),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
+        assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
 }

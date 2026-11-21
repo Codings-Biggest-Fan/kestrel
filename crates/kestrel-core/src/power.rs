@@ -3,14 +3,12 @@
 /// Labels in powercfg's value order: 0 do nothing, 1 sleep, 2 hibernate, 3 shut down.
 pub const LID_ACTIONS: [&str; 4] = ["Do nothing", "Sleep", "Hibernate", "Shut down"];
 
-/// Parses `powercfg /q SCHEME_CURRENT SUB_BUTTONS LIDACTION`. The labels are localized, so
+/// Parses `powercfg /qh SCHEME_CURRENT SUB_BUTTONS LIDACTION`. The labels are localized, so
 /// this takes the first two values written as `: 0x…` (AC, then DC).
 pub fn parse_lid(out: &str) -> Option<(u8, u8)> {
     let mut vals = out.lines().filter_map(|l| {
         let v = l.rsplit(':').next()?.trim();
-        u8::from_str_radix(v.strip_prefix("0x")?, 16)
-            .ok()
-            .filter(|&v| v < 4)
+        u8::from_str_radix(v.strip_prefix("0x")?, 16).ok().filter(|&v| v < 4)
     });
     Some((vals.next()?, vals.next()?))
 }
@@ -26,11 +24,7 @@ fn powercfg(args: &[&str]) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        let msg = if err.is_empty() {
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        } else {
-            err
-        };
+        let msg = if err.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { err };
         return Err(format!("powercfg failed ({}): {msg}", out.status));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
@@ -43,31 +37,17 @@ fn powercfg(_args: &[&str]) -> Result<String, String> {
 
 /// (plugged in, on battery)
 pub fn lid_actions() -> Result<(u8, u8), String> {
-    let out = powercfg(&["/q", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION"])?;
-    parse_lid(&out).ok_or_else(|| {
-        format!(
-            "unexpected powercfg output: {}",
-            out.trim().lines().last().unwrap_or("(empty)")
-        )
-    })
+    // `/qh` includes hidden settings; many laptops hide LIDACTION, and `/q` then prints nothing.
+    let out = powercfg(&["/qh", "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION"])?;
+    parse_lid(&out).ok_or_else(|| format!("unexpected powercfg output: {}", out.trim().lines().last().unwrap_or("(empty)")))
 }
 
 pub fn set_lid_action(ac: bool, action: u8) -> Result<(), String> {
     if action as usize >= LID_ACTIONS.len() {
         return Err(format!("lid action {action} out of range"));
     }
-    let which = if ac {
-        "/setacvalueindex"
-    } else {
-        "/setdcvalueindex"
-    };
-    powercfg(&[
-        which,
-        "SCHEME_CURRENT",
-        "SUB_BUTTONS",
-        "LIDACTION",
-        &action.to_string(),
-    ])?;
+    let which = if ac { "/setacvalueindex" } else { "/setdcvalueindex" };
+    powercfg(&[which, "SCHEME_CURRENT", "SUB_BUTTONS", "LIDACTION", &action.to_string()])?;
     powercfg(&["/setactive", "SCHEME_CURRENT"]).map(drop)
 }
 

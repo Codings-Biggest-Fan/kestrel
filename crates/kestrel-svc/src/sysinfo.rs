@@ -29,13 +29,7 @@ impl Sampler {
         };
         let (used, total) = imp::memory().unwrap_or((0, 0));
         let (on_ac, battery_pct) = imp::power();
-        Sample {
-            cpu_load_pct: load,
-            ram_used_mb: used,
-            ram_total_mb: total,
-            on_ac,
-            battery_pct,
-        }
+        Sample { cpu_load_pct: load, ram_used_mb: used, ram_total_mb: total, on_ac, battery_pct }
     }
 }
 
@@ -51,21 +45,14 @@ mod imp {
     }
 
     pub fn cpu_times() -> Option<(u64, u64)> {
-        let (mut idle, mut kernel, mut user) = (
-            FILETIME::default(),
-            FILETIME::default(),
-            FILETIME::default(),
-        );
+        let (mut idle, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default());
         unsafe { GetSystemTimes(Some(&mut idle), Some(&mut kernel), Some(&mut user)) }.ok()?;
         // Kernel time includes idle time.
         Some((ft(idle), ft(kernel) + ft(user)))
     }
 
     pub fn memory() -> Option<(u32, u32)> {
-        let mut m = MEMORYSTATUSEX {
-            dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
-            ..Default::default()
-        };
+        let mut m = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
         unsafe { GlobalMemoryStatusEx(&mut m) }.ok()?;
         let mb = |b: u64| (b / (1024 * 1024)) as u32;
         Some((mb(m.ullTotalPhys - m.ullAvailPhys), mb(m.ullTotalPhys)))
@@ -81,10 +68,7 @@ mod imp {
             1 => Some(true),
             _ => None,
         };
-        (
-            ac,
-            (s.BatteryLifePercent <= 100).then_some(s.BatteryLifePercent),
-        )
+        (ac, (s.BatteryLifePercent <= 100).then_some(s.BatteryLifePercent))
     }
 }
 
@@ -94,13 +78,7 @@ mod imp {
 
     pub fn cpu_times() -> Option<(u64, u64)> {
         let s = fs::read_to_string("/proc/stat").ok()?;
-        let v: Vec<u64> = s
-            .lines()
-            .next()?
-            .split_whitespace()
-            .skip(1)
-            .filter_map(|x| x.parse().ok())
-            .collect();
+        let v: Vec<u64> = s.lines().next()?.split_whitespace().skip(1).filter_map(|x| x.parse().ok()).collect();
         let idle = v.get(3)? + v.get(4).unwrap_or(&0);
         Some((idle, v.iter().sum()))
     }
@@ -108,24 +86,15 @@ mod imp {
     pub fn memory() -> Option<(u32, u32)> {
         let s = fs::read_to_string("/proc/meminfo").ok()?;
         let kb = |key: &str| -> Option<u64> {
-            s.lines()
-                .find(|l| l.starts_with(key))?
-                .split_whitespace()
-                .nth(1)?
-                .parse()
-                .ok()
+            s.lines().find(|l| l.starts_with(key))?.split_whitespace().nth(1)?.parse().ok()
         };
         let (total, avail) = (kb("MemTotal:")?, kb("MemAvailable:")?);
         Some((((total - avail) / 1024) as u32, (total / 1024) as u32))
     }
 
     pub fn power() -> (Option<bool>, Option<u8>) {
-        let ac = fs::read_to_string("/sys/class/power_supply/AC/online")
-            .ok()
-            .map(|s| s.trim() == "1");
-        let pct = fs::read_to_string("/sys/class/power_supply/BAT0/capacity")
-            .ok()
-            .and_then(|s| s.trim().parse().ok());
+        let ac = fs::read_to_string("/sys/class/power_supply/AC/online").ok().map(|s| s.trim() == "1");
+        let pct = fs::read_to_string("/sys/class/power_supply/BAT0/capacity").ok().and_then(|s| s.trim().parse().ok());
         (ac, pct)
     }
 }

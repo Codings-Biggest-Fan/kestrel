@@ -13,8 +13,7 @@ pub struct GpuInfo {
     pub pstate: String,
 }
 
-pub const QUERY: &str =
-    "name,driver_version,temperature.gpu,power.draw,clocks.gr,clocks.mem,utilization.gpu,pstate";
+pub const QUERY: &str = "name,driver_version,temperature.gpu,power.draw,clocks.gr,clocks.mem,utilization.gpu,pstate";
 pub const DRIVER_PAGE: &str = "https://www.nvidia.com/en-us/drivers/";
 
 /// Parses one line of `--query-gpu=QUERY --format=csv,noheader,nounits`. "[N/A]" fields
@@ -39,22 +38,15 @@ pub fn parse(line: &str) -> Option<GpuInfo> {
 
 pub fn query() -> Result<GpuInfo, String> {
     let mut cmd = std::process::Command::new("nvidia-smi");
-    cmd.args([
-        &format!("--query-gpu={QUERY}"),
-        "--format=csv,noheader,nounits",
-    ]);
+    cmd.args([&format!("--query-gpu={QUERY}"), "--format=csv,noheader,nounits"]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let out = cmd
-        .output()
-        .map_err(|_| "No NVIDIA driver found (nvidia-smi is missing).".to_string())?;
+    let out = cmd.output().map_err(|_| "No NVIDIA driver found (nvidia-smi is missing).".to_string())?;
     let text = String::from_utf8_lossy(&out.stdout);
-    text.lines()
-        .find_map(parse)
-        .ok_or_else(|| "nvidia-smi returned no GPU.".into())
+    text.lines().find_map(parse).ok_or_else(|| "nvidia-smi returned no GPU.".into())
 }
 
 #[cfg(test)]
@@ -63,19 +55,12 @@ mod tests {
 
     #[test]
     fn parses_nvidia_smi() {
-        let g = parse("NVIDIA GeForce RTX 5080 Laptop GPU, 581.57, 48, 12.34, 210, 405, 3, P8")
-            .unwrap();
+        let g = parse("NVIDIA GeForce RTX 5080 Laptop GPU, 581.57, 48, 12.34, 210, 405, 3, P8").unwrap();
         assert_eq!(g.name, "NVIDIA GeForce RTX 5080 Laptop GPU");
         assert_eq!(g.driver, "581.57");
-        assert_eq!(
-            (g.temp_c, g.core_mhz, g.load_pct),
-            (Some(48), Some(210), Some(3))
-        );
+        assert_eq!((g.temp_c, g.core_mhz, g.load_pct), (Some(48), Some(210), Some(3)));
         assert_eq!(g.pstate, "P8");
-        let idle = parse(
-            "NVIDIA GeForce RTX 4060 Laptop GPU, 566.03, [N/A], [N/A], [N/A], [N/A], [N/A], P8",
-        )
-        .unwrap();
+        let idle = parse("NVIDIA GeForce RTX 4060 Laptop GPU, 566.03, [N/A], [N/A], [N/A], [N/A], [N/A], P8").unwrap();
         assert_eq!(idle.temp_c, None);
         assert!(parse("").is_none());
     }

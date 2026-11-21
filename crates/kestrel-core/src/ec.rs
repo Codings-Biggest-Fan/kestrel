@@ -55,10 +55,7 @@ impl MockEc {
         for (i, b) in fw.bytes().take(FW_VERSION_LENGTH).enumerate() {
             regs[FW_VERSION_ADDRESS as usize + i] = b;
         }
-        Self {
-            regs,
-            writes: Vec::new(),
-        }
+        Self { regs, writes: Vec::new() }
     }
 }
 
@@ -89,12 +86,7 @@ pub struct MsiEc {
 
 impl MsiEc {
     pub fn new(io: Box<dyn EcIo>, conf: ModelConf, journal: Journal, read_only: bool) -> Self {
-        Self {
-            io,
-            conf,
-            journal,
-            read_only,
-        }
+        Self { io, conf, journal, read_only }
     }
 
     pub fn conf(&self) -> &ModelConf {
@@ -104,6 +96,10 @@ impl MsiEc {
     /// Raw read for diagnostics.
     pub fn peek(&mut self, addr: u8) -> Result<u8> {
         self.io.read(addr)
+    }
+
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
     }
 
     pub fn read_only(&self) -> bool {
@@ -144,11 +140,7 @@ impl MsiEc {
         let addr = f.address.ok_or(EcError::Unsupported(what))?;
         let cur = self.io.read(addr)?;
         let set = on != f.invert;
-        let new = if set {
-            cur | (1 << f.bit)
-        } else {
-            cur & !(1 << f.bit)
-        };
+        let new = if set { cur | (1 << f.bit) } else { cur & !(1 << f.bit) };
         self.write(addr, new)
     }
 
@@ -156,19 +148,13 @@ impl MsiEc {
         let f = f.ok_or(EcError::Unsupported(what))?.clone();
         let addr = f.address.ok_or(EcError::Unsupported(what))?;
         let v = self.io.read(addr)?;
-        Ok(f.modes
-            .iter()
-            .find(|(_, &m)| m == v)
-            .map(|(k, _)| k.clone()))
+        Ok(f.modes.iter().find(|(_, &m)| m == v).map(|(k, _)| k.clone()))
     }
 
     fn set_mode(&mut self, f: Option<&ModeField>, what: &'static str, name: &str) -> Result<()> {
         let f = f.ok_or(EcError::Unsupported(what))?.clone();
         let addr = f.address.ok_or(EcError::Unsupported(what))?;
-        let v = *f
-            .modes
-            .get(name)
-            .ok_or_else(|| EcError::InvalidValue(format!("{what} mode {name}")))?;
+        let v = *f.modes.get(name).ok_or_else(|| EcError::InvalidValue(format!("{what} mode {name}")))?;
         let cur = self.io.read(addr)?;
         if !f.modes.values().any(|&m| m == cur) {
             // The register holds a byte the map does not know: the map is wrong for this board.
@@ -205,18 +191,12 @@ impl MsiEc {
     }
 
     pub fn super_battery(&mut self) -> Result<bool> {
-        let f = self
-            .conf
-            .super_battery
-            .ok_or(EcError::Unsupported("Super Battery"))?;
+        let f = self.conf.super_battery.ok_or(EcError::Unsupported("Super Battery"))?;
         let addr = f.address.ok_or(EcError::Unsupported("Super Battery"))?;
         Ok(self.io.read(addr)? & f.mask == f.mask)
     }
     pub fn set_super_battery(&mut self, on: bool) -> Result<()> {
-        let f = self
-            .conf
-            .super_battery
-            .ok_or(EcError::Unsupported("Super Battery"))?;
+        let f = self.conf.super_battery.ok_or(EcError::Unsupported("Super Battery"))?;
         let addr = f.address.ok_or(EcError::Unsupported("Super Battery"))?;
         let cur = self.io.read(addr)?;
         self.write(addr, if on { cur | f.mask } else { cur & !f.mask })
@@ -224,50 +204,30 @@ impl MsiEc {
 
     /// Battery charge end threshold in percent (10-100).
     pub fn charge_limit(&mut self) -> Result<Option<u8>> {
-        let addr = self
-            .conf
-            .charge_control_address
-            .ok_or(EcError::Unsupported("Charge limit"))?;
+        let addr = self.conf.charge_control_address.ok_or(EcError::Unsupported("Charge limit"))?;
         let v = self.io.read(addr)? & 0x7f;
         Ok((10..=100).contains(&v).then_some(v))
     }
     pub fn set_charge_limit(&mut self, pct: u8) -> Result<()> {
-        let addr = self
-            .conf
-            .charge_control_address
-            .ok_or(EcError::Unsupported("Charge limit"))?;
+        let addr = self.conf.charge_control_address.ok_or(EcError::Unsupported("Charge limit"))?;
         if !(10..=100).contains(&pct) {
             return Err(EcError::InvalidValue(format!("charge limit {pct}%")));
         }
         let cur = self.io.read(addr)? & 0x7f;
         if cur != 0 && !(10..=100).contains(&cur) {
-            return Err(EcError::InvalidValue(format!(
-                "charge register holds {cur}; not writing"
-            )));
+            return Err(EcError::InvalidValue(format!("charge register holds {cur}; not writing")));
         }
         self.write(addr, pct | 0x80)
     }
 
     pub fn kbd_backlight(&mut self) -> Result<u8> {
-        let kb = self
-            .conf
-            .kbd_bl
-            .clone()
-            .ok_or(EcError::Unsupported("Keyboard backlight"))?;
-        let addr = kb
-            .bl_state_address
-            .ok_or(EcError::Unsupported("Keyboard backlight"))?;
+        let kb = self.conf.kbd_bl.clone().ok_or(EcError::Unsupported("Keyboard backlight"))?;
+        let addr = kb.bl_state_address.ok_or(EcError::Unsupported("Keyboard backlight"))?;
         Ok(self.io.read(addr)? & 0x03)
     }
     pub fn set_kbd_backlight(&mut self, level: u8) -> Result<()> {
-        let kb = self
-            .conf
-            .kbd_bl
-            .clone()
-            .ok_or(EcError::Unsupported("Keyboard backlight"))?;
-        let addr = kb
-            .bl_state_address
-            .ok_or(EcError::Unsupported("Keyboard backlight"))?;
+        let kb = self.conf.kbd_bl.clone().ok_or(EcError::Unsupported("Keyboard backlight"))?;
+        let addr = kb.bl_state_address.ok_or(EcError::Unsupported("Keyboard backlight"))?;
         if level > kb.max_state {
             return Err(EcError::InvalidValue(format!("backlight level {level}")));
         }
@@ -275,27 +235,13 @@ impl MsiEc {
     }
 
     pub fn webcam(&mut self) -> Result<bool> {
-        let w = self
-            .conf
-            .webcam
-            .ok_or(EcError::Unsupported("Webcam switch"))?;
-        let f = BitField {
-            address: w.address,
-            bit: w.bit,
-            invert: false,
-        };
+        let w = self.conf.webcam.ok_or(EcError::Unsupported("Webcam switch"))?;
+        let f = BitField { address: w.address, bit: w.bit, invert: false };
         self.get_bit(Some(f), "Webcam switch")
     }
     pub fn set_webcam(&mut self, on: bool) -> Result<()> {
-        let w = self
-            .conf
-            .webcam
-            .ok_or(EcError::Unsupported("Webcam switch"))?;
-        let f = BitField {
-            address: w.address,
-            bit: w.bit,
-            invert: false,
-        };
+        let w = self.conf.webcam.ok_or(EcError::Unsupported("Webcam switch"))?;
+        let f = BitField { address: w.address, bit: w.bit, invert: false };
         self.set_bit(Some(f), "Webcam switch", on)
     }
 
@@ -308,8 +254,7 @@ impl MsiEc {
 
     /// (CPU temp °C, CPU fan %, GPU temp °C, GPU fan %).
     pub fn sensors(&mut self) -> Result<[Option<u8>; 4]> {
-        let mut rd =
-            |a: Option<u8>| -> Result<Option<u8>> { a.map(|a| self.io.read(a)).transpose() };
+        let mut rd = |a: Option<u8>| -> Result<Option<u8>> { a.map(|a| self.io.read(a)).transpose() };
         let cpu = self.conf.cpu;
         let gpu = self.conf.gpu;
         Ok([
@@ -322,9 +267,7 @@ impl MsiEc {
 
     /// (CPU fan rpm, GPU fan rpm) from the tachometer registers, if the map has them.
     pub fn fan_rpm(&mut self) -> Result<[Option<u32>; 2]> {
-        let Some(t) = self.conf.fan_rpm else {
-            return Ok([None, None]);
-        };
+        let Some(t) = self.conf.fan_rpm else { return Ok([None, None]) };
         let mut rpm = |a: Option<u8>| -> Result<Option<u32>> {
             let Some(a) = a else { return Ok(None) };
             let raw = if t.wide {
@@ -339,15 +282,8 @@ impl MsiEc {
 
     /// EC fan curve for `gpu == false` (CPU) or `true` (GPU): (temps °C, speeds %).
     pub fn fan_curve(&mut self, gpu: bool) -> Result<(Vec<u8>, Vec<u8>)> {
-        let m = self
-            .conf
-            .fan_curve
-            .ok_or(EcError::Unsupported("fan curve"))?;
-        let (tb, sb) = if gpu {
-            (m.gpu_temp_base, m.gpu_speed_base)
-        } else {
-            (m.cpu_temp_base, m.cpu_speed_base)
-        };
+        let m = self.conf.fan_curve.ok_or(EcError::Unsupported("fan curve"))?;
+        let (tb, sb) = if gpu { (m.gpu_temp_base, m.gpu_speed_base) } else { (m.cpu_temp_base, m.cpu_speed_base) };
         let n = m.points as usize;
         let mut t = vec![0; n];
         let mut sp = vec![0; n];
@@ -362,10 +298,7 @@ impl MsiEc {
         if self.read_only {
             return Err(EcError::ReadOnly);
         }
-        let m = self
-            .conf
-            .fan_curve
-            .ok_or(EcError::Unsupported("fan curve"))?;
+        let m = self.conf.fan_curve.ok_or(EcError::Unsupported("fan curve"))?;
         if speeds.len() != m.points as usize
             || speeds.iter().any(|&v| v > 100)
             || speeds.windows(2).any(|w| w[1] < w[0])
@@ -374,15 +307,9 @@ impl MsiEc {
         }
         let (_, current) = self.fan_curve(gpu)?;
         if current.iter().any(|&v| v > 150) {
-            return Err(EcError::InvalidValue(format!(
-                "fan curve table holds {current:?}; not writing"
-            )));
+            return Err(EcError::InvalidValue(format!("fan curve table holds {current:?}; not writing")));
         }
-        let base = if gpu {
-            m.gpu_speed_base
-        } else {
-            m.cpu_speed_base
-        };
+        let base = if gpu { m.gpu_speed_base } else { m.cpu_speed_base };
         // All-or-nothing: if any byte fails, put every byte touched so far back, so the
         // firmware never runs a half-written (possibly falling) curve.
         for (i, &v) in speeds.iter().enumerate() {
@@ -465,11 +392,7 @@ mod tests {
     fn refuses_mode_write_when_register_holds_unknown_byte() {
         let mut io = MockEc::with_firmware("15MMIMS1.103");
         io.regs[0xd2] = 0x37;
-        let conf = ModelDb::embedded()
-            .find("15MMIMS1.103")
-            .unwrap()
-            .conf
-            .clone();
+        let conf = ModelDb::embedded().find("15MMIMS1.103").unwrap().conf.clone();
         let mut e = MsiEc::new(Box::new(io), conf, Journal::in_memory(), false);
         assert!(e.set_shift_mode("turbo").is_err());
         assert!(e.journal.is_empty());
@@ -481,28 +404,17 @@ mod tests {
             self.0.read(a)
         }
         fn write(&mut self, a: u8, v: u8) -> Result<()> {
-            if a == self.1 {
-                Ok(())
-            } else {
-                self.0.write(a, v)
-            }
+            if a == self.1 { Ok(()) } else { self.0.write(a, v) }
         }
     }
 
     #[test]
     fn read_only_fan_curve_request_touches_nothing() {
-        let conf = ModelDb::embedded()
-            .find("15MMIMS1.103")
-            .unwrap()
-            .conf
-            .clone();
+        let conf = ModelDb::embedded().find("15MMIMS1.103").unwrap().conf.clone();
         let mut io = MockEc::with_firmware("15MMIMS1.103");
         io.regs[0x72] = 9;
         let mut e = MsiEc::new(Box::new(io), conf, Journal::in_memory(), true);
-        assert!(matches!(
-            e.set_fan_curve_speeds(false, &[0, 50, 60, 70, 80, 100]),
-            Err(EcError::ReadOnly)
-        ));
+        assert!(matches!(e.set_fan_curve_speeds(false, &[0, 50, 60, 70, 80, 100]), Err(EcError::ReadOnly)));
         assert_eq!(e.fan_curve(false).unwrap().1[0], 9);
         assert!(e.journal.is_empty());
     }
@@ -513,20 +425,9 @@ mod tests {
         io.regs[0xd4] = 0x8d;
         let orig = [0, 30, 45, 60, 75, 90];
         io.regs[0x72..0x78].copy_from_slice(&orig);
-        let conf = ModelDb::embedded()
-            .find("15MMIMS1.103")
-            .unwrap()
-            .conf
-            .clone();
-        let mut e = MsiEc::new(
-            Box::new(StuckAt(io, 0x74)),
-            conf,
-            Journal::in_memory(),
-            false,
-        );
-        assert!(e
-            .set_fan_curve_speeds(false, &[0, 50, 60, 70, 80, 100])
-            .is_err());
+        let conf = ModelDb::embedded().find("15MMIMS1.103").unwrap().conf.clone();
+        let mut e = MsiEc::new(Box::new(StuckAt(io, 0x74)), conf, Journal::in_memory(), false);
+        assert!(e.set_fan_curve_speeds(false, &[0, 50, 60, 70, 80, 100]).is_err());
         assert_eq!(e.fan_curve(false).unwrap().1, orig.to_vec());
     }
 
@@ -537,11 +438,7 @@ mod tests {
         }
         fn write(&mut self, a: u8, v: u8) -> Result<()> {
             // Simulates firmware that ignores writes to 0x98.
-            if a == 0x98 {
-                Ok(())
-            } else {
-                self.0.write(a, v)
-            }
+            if a == 0x98 { Ok(()) } else { self.0.write(a, v) }
         }
     }
 
@@ -549,15 +446,10 @@ mod tests {
     fn vector_fan_curve_speeds_are_validated_and_journaled() {
         let mut e = ec("15MMIMS1.103");
         assert_eq!(e.fan_curve(false).unwrap().1.len(), 6);
-        assert!(e
-            .set_fan_curve_speeds(false, &[0, 40, 30, 60, 80, 100])
-            .is_err());
-        assert!(e
-            .set_fan_curve_speeds(false, &[0, 40, 50, 60, 80, 101])
-            .is_err());
+        assert!(e.set_fan_curve_speeds(false, &[0, 40, 30, 60, 80, 100]).is_err());
+        assert!(e.set_fan_curve_speeds(false, &[0, 40, 50, 60, 80, 101]).is_err());
         assert!(e.set_fan_curve_speeds(false, &[0, 40]).is_err());
-        e.set_fan_curve_speeds(false, &[0, 40, 50, 60, 80, 100])
-            .unwrap();
+        e.set_fan_curve_speeds(false, &[0, 40, 50, 60, 80, 100]).unwrap();
         assert_eq!(e.fan_curve(false).unwrap().1, vec![0, 40, 50, 60, 80, 100]);
         assert_eq!(e.journal.entries().count(), 6);
         e.restore().unwrap();
@@ -566,17 +458,8 @@ mod tests {
 
     #[test]
     fn write_that_does_not_stick_is_an_error() {
-        let conf = ModelDb::embedded()
-            .find("15MMIMS1.103")
-            .unwrap()
-            .conf
-            .clone();
-        let mut e = MsiEc::new(
-            Box::new(StuckEc(MockEc::with_firmware("15MMIMS1.103"))),
-            conf,
-            Journal::in_memory(),
-            false,
-        );
+        let conf = ModelDb::embedded().find("15MMIMS1.103").unwrap().conf.clone();
+        let mut e = MsiEc::new(Box::new(StuckEc(MockEc::with_firmware("15MMIMS1.103"))), conf, Journal::in_memory(), false);
         assert!(e.set_cooler_boost(true).is_err());
     }
 
@@ -585,11 +468,7 @@ mod tests {
         let mut io = MockEc::with_firmware("15MMIMS1.103");
         io.regs[0xc8] = 0x00;
         io.regs[0xc9] = 0xc8; // 200 -> 2400 rpm
-        let conf = ModelDb::embedded()
-            .find("15MMIMS1.103")
-            .unwrap()
-            .conf
-            .clone();
+        let conf = ModelDb::embedded().find("15MMIMS1.103").unwrap().conf.clone();
         let mut e = MsiEc::new(Box::new(io), conf, Journal::in_memory(), true);
         assert_eq!(e.fan_rpm().unwrap(), [Some(2400), Some(0)]);
     }
@@ -597,11 +476,7 @@ mod tests {
     #[test]
     fn read_only_blocks_writes() {
         let mut io = MockEc::with_firmware("17S1IMS1.114");
-        let conf = ModelDb::embedded()
-            .find(&read_firmware_id(&mut io).unwrap())
-            .unwrap()
-            .conf
-            .clone();
+        let conf = ModelDb::embedded().find(&read_firmware_id(&mut io).unwrap()).unwrap().conf.clone();
         let mut e = MsiEc::new(Box::new(io), conf, Journal::in_memory(), true);
         assert!(matches!(e.set_cooler_boost(true), Err(EcError::ReadOnly)));
     }

@@ -12,55 +12,44 @@ const MAX_FRAME: usize = 1 << 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Request {
-    Hello {
-        protocol: u32,
-    },
+    Hello { protocol: u32 },
     GetStatus,
     SetScenario(Scenario),
     SetCoolerBoost(bool),
     SetChargeLimit(u8),
     SetKbdBacklight(u8),
-    GetFanCurve {
-        gpu: bool,
-    },
+    GetFanCurve { gpu: bool },
     /// Speeds only, one per curve point; also switches the EC to its advanced (curve) fan mode.
-    SetFanCurve {
-        gpu: bool,
-        speeds: Vec<u8>,
-    },
+    SetFanCurve { gpu: bool, speeds: Vec<u8> },
     /// Put every register Kestrel changed back to its original value.
     RestoreDefaults,
+    ConfirmFirmware,
+    SetWebcam(bool),
+    /// `true` puts the Win key on the left of the bottom row (Fn on the right).
+    SetFnWinSwap(bool),
     GetLighting,
     /// Static colour on a USB RGB device; `brightness` 0–100, 0 turns it off.
-    SetLighting {
-        device: String,
-        color: [u8; 3],
-        brightness: u8,
-    },
+    SetLighting { device: String, color: [u8; 3], brightness: u8 },
     /// Driver updates Windows Update offers for this PC.
     GetDriverUpdates,
     /// Download and install the driver updates with these Windows Update IDs.
     InstallDriverUpdates(Vec<String>),
+    GetCpuPower,
+    /// Package power limits in watts; the service clamps them to `cpu_power::MIN_W..=MAX_W`.
+    SetCpuPower { sustained_w: u32, boost_w: u32 },
+    ResetCpuPower,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Response {
-    Hello {
-        protocol: u32,
-        version: String,
-    },
+    Hello { protocol: u32, version: String },
     Status(Box<Status>),
-    FanCurve {
-        temps: Vec<u8>,
-        speeds: Vec<u8>,
-    },
+    FanCurve { temps: Vec<u8>, speeds: Vec<u8> },
     Lighting(Vec<LightDevice>),
     Drivers(Vec<DriverUpdate>),
     /// `failed`: Windows Update installed only some of them.
-    Installed {
-        reboot: bool,
-        failed: bool,
-    },
+    Installed { reboot: bool, failed: bool },
+    CpuPower(crate::cpu_power::CpuPowerInfo),
     Ok,
     Error(String),
 }
@@ -92,6 +81,10 @@ pub struct ModelInfo {
     pub wmi: Option<WmiGen>,
     /// Unknown models and models without a verified map never get EC writes.
     pub read_only: bool,
+    /// The EC firmware differs from the one the map was confirmed on; writes stay off
+    /// until the owner confirms with `ConfirmFirmware`.
+    #[serde(default)]
+    pub firmware_changed: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -103,6 +96,16 @@ pub struct Capabilities {
     pub shift_modes: Vec<String>,
     #[serde(default)]
     pub fan_curve: bool,
+    /// Scenarios to offer, in `Scenario::ALL` order.
+    #[serde(default)]
+    pub scenarios: Vec<Scenario>,
+    /// Points per fan curve (0 = no editable curve).
+    #[serde(default)]
+    pub curve_points: u8,
+    #[serde(default)]
+    pub webcam: bool,
+    #[serde(default)]
+    pub fn_win_swap: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -124,15 +127,16 @@ pub struct Status {
     pub ram_total_mb: u32,
     pub on_ac: Option<bool>,
     pub battery_pct: Option<u8>,
+    #[serde(default)]
+    pub webcam: Option<bool>,
+    #[serde(default)]
+    pub fn_win_swap: Option<bool>,
 }
 
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {
     let body = serde_json::to_vec(msg).map_err(io::Error::other)?;
     if body.len() > MAX_FRAME {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "frame too large",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "frame too large"));
     }
     let mut buf = Vec::with_capacity(4 + body.len());
     buf.extend_from_slice(&(body.len() as u32).to_le_bytes());
@@ -146,10 +150,7 @@ pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> io::Result<T> {
     r.read_exact(&mut len)?;
     let len = u32::from_le_bytes(len) as usize;
     if len > MAX_FRAME {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "frame too large",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
     }
     let mut body = vec![0u8; len];
     r.read_exact(&mut body)?;
@@ -164,12 +165,7 @@ pub struct Client<S: Read + Write> {
 
 impl<S: Read + Write> Client<S> {
     pub fn handshake(mut stream: S) -> io::Result<Self> {
-        write_frame(
-            &mut stream,
-            &Request::Hello {
-                protocol: PROTOCOL_VERSION,
-            },
-        )?;
+        write_frame(&mut stream, &Request::Hello { protocol: PROTOCOL_VERSION })?;
         match read_frame(&mut stream)? {
             Response::Hello { protocol, version } if protocol == PROTOCOL_VERSION => {
                 Ok(Self { stream, server_version: version })

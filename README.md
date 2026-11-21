@@ -4,6 +4,14 @@ Lightweight open-source control center for MSI laptops (and, experimentally, GIG
 lighting and monitoring. Native Rust + Slint, no .NET, no WebView. Budget: under 50 MB RAM with
 every window open.
 
+## Screenshots
+
+| Dashboard | Scenarios and profiles |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Scenarios](docs/screenshots/scenarios.png) |
+| **Settings and automation** | **Fan curve editor** |
+| ![Settings](docs/screenshots/settings.png) | ![Fan curve](docs/screenshots/fan-curve.png) |
+
 ## Install
 
 Step-by-step guide (download, running PowerShell as administrator, first run, undo): [docs/INSTALL.md](docs/INSTALL.md).
@@ -47,6 +55,9 @@ Tag `vX.Y.Z`. The release workflow signs `manifest.json` with the `KESTREL_SIGNI
 Builds without a key refuse to install updates.
 
 ## License
+
+CPU power limits use the [PawnIO](https://github.com/namazso/PawnIO) driver; the `RyzenSMU` and `IntelMSR` modules in `crates/kestrel-svc/pawnio/` come from [PawnIO.Modules](https://github.com/namazso/PawnIO.Modules) 0.2.12 (LGPL-2.1). SMU message IDs and mailbox addresses follow [RyzenAdj](https://github.com/FlyGoat/RyzenAdj).
+
 
 GPL-3.0-or-later. Register maps derive from [msi-ec](https://github.com/BeardOverflow/msi-ec)
 (GPL-2.0-or-later) and GhostDeck owner reports (GPL-3.0).

@@ -122,6 +122,7 @@ component Unsupported inherits Card {
 }
 
 export struct ScenarioItem { label: string, hint: string }
+export struct ProfileItem { name: string, desc: string, preset: bool }
 export struct LightItem { id: string, name: string, kind: string, supported: bool }
 
 export component AppWindow inherits Window {
@@ -138,10 +139,31 @@ export component AppWindow inherits Window {
     in property <string> model-name: "Connecting…";
     in property <string> firmware;
     in property <bool> read-only: true;
+    in property <bool> firmware-changed;
+    in property <bool> has-webcam;
+    in property <bool> webcam;
+    in property <bool> has-fn-swap;
+    in property <bool> fn-swap;
+    callback set-webcam(bool);
+    callback set-fn-swap(bool);
+    callback confirm-firmware();
     in property <bool> supported;
     property <bool> can-write: connected && supported && !read-only;
     in property <string> message;
     in property <[ScenarioItem]> scenarios;
+    in property <[ProfileItem]> profiles;
+    in property <bool> cpu-ok;
+    in property <string> cpu-name;
+    in property <string> cpu-note;
+    in-out property <int> cpu-sustained: 45;
+    in-out property <int> cpu-boost: 65;
+    callback set-cpu-power(int, int);
+    callback reset-cpu-power();
+    in-out property <bool> save-curves;
+    in-out property <string> profile-name;
+    callback apply-profile(int);
+    callback delete-profile(int);
+    callback save-profile(string, bool);
     in property <int> scenario: -1;
     in property <string> cpu-temp: "–";
     in property <string> gpu-temp: "–";
@@ -182,6 +204,9 @@ export component AppWindow inherits Window {
     in-out property <int> auto-bat: -1;
     in-out property <int> auto-ac: -1;
     in-out property <bool> auto-60hz;
+    in-out property <int> auto-low-pct;
+    in-out property <int> auto-low-scn: -1;
+    callback set-low-battery(int, int);
     in property <int> lid-ac: -1;
     in property <string> lid-error;
     in property <int> lid-dc: -1;
@@ -191,6 +216,10 @@ export component AppWindow inherits Window {
     in-out property <int> rule-scn: 0;
     callback add-rule(string, int);
     callback remove-rule(int);
+    in property <[string]> sched;
+    in-out property <int> sched-scn: 0;
+    callback add-sched(string, string, int);
+    callback remove-sched(int);
     in property <string> gpu-name;
     in property <string> gpu-driver;
     in property <string> gpu-stats;
@@ -209,6 +238,11 @@ export component AppWindow inherits Window {
     in-out property <bool> curve-ready;
     in property <[int]> curve-temps;
     in-out property <[int]> curve-speeds;
+    in property <[float]> curve-xs;
+    in property <string> curve-line;
+    in property <string> curve-fill;
+    callback curve-drag(bool, float, float);
+    callback curve-resize(float, float);
     callback load-curve(bool);
     callback apply-curve(bool, [int]);
 
@@ -295,7 +329,7 @@ export component AppWindow inherits Window {
                 Rectangle {}
             }
 
-            if page == 1: VerticalLayout {
+            if page == 1: Flickable { interactive: false; VerticalLayout {
                 spacing: 12px;
                 if connected && !supported: Unsupported {}
                 for s[i] in supported ? scenarios : []: Rectangle {
@@ -312,10 +346,42 @@ export component AppWindow inherits Window {
                             Text { text: s.label; color: Theme.text; font-size: 15px; font-weight: 600; }
                             Text { text: s.hint; color: Theme.muted; font-size: 12px; } } }
                 }
-                Rectangle {}
-            }
+                if supported && cpu-name != "": Card { title: "CPU POWER LIMITS · EXPERIMENTAL";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: cpu-name + (cpu-note != "" ? " · " + cpu-note : "") + (cpu-ok ? ". Sustained is the long-run package power, boost the short-burst limit. The laptop's own temperature limits still apply." : ""); }
+                    if cpu-ok: HorizontalLayout { spacing: 8px; alignment: start;
+                        Text { text: "Sustained"; width: 80px; color: Theme.text; vertical-alignment: center; font-size: 13px; }
+                        Pill { width: 44px; label: "−"; clicked => { cpu-sustained = max(5, cpu-sustained - 5); } }
+                        Text { text: cpu-sustained + " W"; width: 64px; color: Theme.text; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; font-weight: 600; }
+                        Pill { width: 44px; label: "+"; clicked => { cpu-sustained = min(200, cpu-sustained + 5); cpu-boost = max(cpu-boost, cpu-sustained); } } }
+                    if cpu-ok: HorizontalLayout { spacing: 8px; alignment: start;
+                        Text { text: "Boost"; width: 80px; color: Theme.text; vertical-alignment: center; font-size: 13px; }
+                        Pill { width: 44px; label: "−"; clicked => { cpu-boost = max(cpu-sustained, cpu-boost - 5); } }
+                        Text { text: cpu-boost + " W"; width: 64px; color: Theme.text; horizontal-alignment: center; vertical-alignment: center; font-size: 14px; font-weight: 600; }
+                        Pill { width: 44px; label: "+"; clicked => { cpu-boost = min(200, cpu-boost + 5); } } }
+                    if cpu-ok: HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 110px; label: "Apply"; selected: true; enabled: can-write; clicked => { set-cpu-power(cpu-sustained, cpu-boost); } }
+                        Pill { width: 110px; label: "Reset"; enabled: can-write; clicked => { reset-cpu-power(); } } } }
+                if supported: Card { title: "PROFILES";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "A scenario with optional fan curves and Cooler Boost, applied in one click. Fan curves switch laptops like the Vector A16 HX to Extreme."; }
+                    for p[i] in profiles: HorizontalLayout { spacing: 10px;
+                        VerticalLayout { alignment: center; spacing: 2px;
+                            Text { text: p.name; color: Theme.text; font-size: 14px; font-weight: 600; }
+                            Text { text: p.preset ? p.desc : p.desc + " · yours"; color: Theme.muted; font-size: 12px; } }
+                        Pill { width: 90px; label: "Apply"; enabled: can-write; clicked => { apply-profile(i); } }
+                        Rectangle { width: 90px;
+                            if !p.preset: Pill { width: 90px; label: "Delete"; clicked => { delete-profile(i); } } } }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Rectangle { width: 200px; height: 34px; border-radius: 8px; background: #0f1115; border-width: 1px; border-color: #2a2f3a;
+                            name-input := TextInput { text <=> root.profile-name; x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
+                            if name-input.text == "": Text { x: 10px; text: "Profile name"; color: Theme.muted; vertical-alignment: center; font-size: 13px; } }
+                        if has-curve: Pill { width: 190px; label: save-curves ? "With current fan curves" : "Without fan curves"; selected: save-curves; clicked => { save-curves = !save-curves; } }
+                        Pill { width: 130px; label: "Save current"; selected: true; enabled: can-write && name-input.text != "";
+                            clicked => { save-profile(name-input.text, save-curves); } } } }
+            } }
 
-            if page == 2: VerticalLayout {
+            if page == 2: Flickable { interactive: false; VerticalLayout {
                 spacing: 16px;
                 HorizontalLayout { spacing: 16px;
                     Gauge { title: "CPU FAN"; arc: cpu-arc; track: track; fill: cpu-temp-f; value: cpu-temp; unit: cpu-fan; sub: "CPU °C"; }
@@ -331,24 +397,44 @@ export component AppWindow inherits Window {
                     if has-curve: HorizontalLayout { spacing: 8px; alignment: start;
                         Pill { width: 96px; label: "CPU"; selected: !curve-gpu; clicked => { curve-gpu = false; curve-ready = false; load-curve(false); } }
                         Pill { width: 96px; label: "GPU"; selected: curve-gpu; clicked => { curve-gpu = true; curve-ready = false; load-curve(true); } } }
-                    if has-curve: HorizontalLayout { spacing: 10px; min-height: 170px; vertical-stretch: 1;
-                        for v[i] in curve-speeds: VerticalLayout { spacing: 6px;
-                            Rectangle { background: #1b1e26; border-radius: 8px; border-width: 1px; border-color: Theme.line;
-                                Rectangle { y: parent.height - self.height; height: parent.height * v / 100; border-radius: 8px;
-                                    background: @linear-gradient(0deg, Theme.accent-fill, Theme.accent);
-                                    animate height { duration: 120ms; easing: ease-out; } }
-                                Text { y: 6px; text: v + "%"; color: Theme.text; font-size: 12px; font-weight: 600; horizontal-alignment: center; }
-                                TouchArea { enabled: can-write && curve-ready; mouse-cursor: can-write && curve-ready ? MouseCursor.ns-resize : MouseCursor.default;
-                                    pointer-event(e) => { if e.kind == PointerEventKind.down { curve-speeds[i] = max(0, min(100, round((1 - self.mouse-y / self.height) * 20) * 5)); } }
-                                    moved => { if self.pressed { curve-speeds[i] = max(0, min(100, round((1 - self.mouse-y / self.height) * 20) * 5)); } } } }
-                            Text { text: i < curve-temps.length ? curve-temps[i] + " °C" : ""; color: Theme.muted; font-size: 11px; horizontal-alignment: center; } } }
+                    if has-curve: HorizontalLayout { spacing: 8px; min-height: 230px; vertical-stretch: 1;
+                        VerticalLayout { width: 34px; padding-bottom: 22px;
+                            Text { text: "100%"; color: Theme.muted; font-size: 10px; horizontal-alignment: right; }
+                            Rectangle {}
+                            Text { text: "50%"; color: Theme.muted; font-size: 10px; horizontal-alignment: right; }
+                            Rectangle {}
+                            Text { text: "0%"; color: Theme.muted; font-size: 10px; horizontal-alignment: right; } }
+                        VerticalLayout { spacing: 6px;
+                            graph := Rectangle { background: #13151b; border-radius: 10px; border-width: 1px; border-color: Theme.line; clip: true;
+                                init => { curve-resize(self.width / 1px, self.height / 1px); }
+                                changed width => { curve-resize(self.width / 1px, self.height / 1px); }
+                                changed height => { curve-resize(self.width / 1px, self.height / 1px); }
+                                for f in [0.25, 0.5, 0.75]: Rectangle { y: parent.height * f; height: 1px; background: #232731; }
+                                for x in curve-xs: Rectangle { x: parent.width * x; width: 1px; background: #1c1f27; }
+                                Path { width: 100%; height: 100%; viewbox-width: graph.width / 1px; viewbox-height: graph.height / 1px; commands: curve-fill;
+                                    fill: @linear-gradient(180deg, #e5393566, #e5393505); stroke-width: 0px; }
+                                Path { width: 100%; height: 100%; viewbox-width: graph.width / 1px; viewbox-height: graph.height / 1px; commands: curve-line;
+                                    fill: transparent; stroke: Theme.accent; stroke-width: 2.5px; }
+                                for v[i] in curve-speeds: Rectangle {
+                                    x: parent.width * (i < curve-xs.length ? curve-xs[i] : 0) - 8px; y: parent.height * (1 - v / 100) - 8px;
+                                    width: 16px; height: 16px; border-radius: 8px; background: Theme.accent; border-width: 3px; border-color: #13151b;
+                                    animate y { duration: 90ms; easing: ease-out; } }
+                                for v[i] in curve-speeds: Text {
+                                    x: max(2px, min(parent.width - 36px, parent.width * (i < curve-xs.length ? curve-xs[i] : 0) - 16px));
+                                    y: v > 85 ? parent.height * (1 - v / 100) + 12px : parent.height * (1 - v / 100) - 26px;
+                                    width: 32px; text: v + "%"; color: Theme.text; font-size: 11px; font-weight: 600; horizontal-alignment: center; }
+                                TouchArea { enabled: can-write && curve-ready; mouse-cursor: can-write && curve-ready ? MouseCursor.pointer : MouseCursor.default;
+                                    pointer-event(e) => { if e.kind == PointerEventKind.down { curve-drag(true, self.mouse-x / self.width, self.mouse-y / self.height); } }
+                                    moved => { if self.pressed { curve-drag(false, self.mouse-x / self.width, self.mouse-y / self.height); } } } }
+                            Rectangle { height: 16px;
+                                for t[i] in curve-temps: Text { x: max(0px, min(parent.width - 40px, graph.width * (i < curve-xs.length ? curve-xs[i] : 0) - 20px)); width: 40px;
+                                    text: t + " °C"; color: Theme.muted; font-size: 11px; horizontal-alignment: center; } } } }
                     if has-curve: HorizontalLayout { spacing: 8px; alignment: start;
                         Pill { width: 128px; label: "Apply curve"; selected: true; enabled: can-write && curve-ready; clicked => { curve-ready = false; apply-curve(curve-gpu, curve-speeds); } }
                         Pill { width: 96px; label: "Reload"; clicked => { curve-ready = false; load-curve(curve-gpu); } } }
                     if has-curve: Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
-                        text: "Drag a bar to set fan speed. Speeds are kept rising left to right; temperature points stay as the firmware set them. Choosing a scenario returns fan control to the firmware. Laptops that only follow custom curves in Extreme (such as the Vector A16 HX) switch to Extreme when you apply. GIGABYTE laptops use one 15-point curve for both fans."; } }
-                Rectangle {}
-            }
+                        text: "Drag a point up or down to set fan speed. Speeds are kept rising left to right; temperature points stay as the firmware set them. GIGABYTE laptops use one 15-point curve for both fans. Choosing a scenario returns fan control to the firmware. Laptops that only follow custom curves in Extreme (such as the Vector A16 HX) switch to Extreme when you apply."; } }
+            } }
 
             if page == 3: VerticalLayout {
                 spacing: 16px;
@@ -417,9 +503,21 @@ export component AppWindow inherits Window {
 
             if page == 6: Flickable { VerticalLayout {
                 spacing: 16px;
+                if has-webcam || has-fn-swap: Card { title: "KEYBOARD AND CAMERA";
+                    if has-webcam: HorizontalLayout { spacing: 8px; alignment: start;
+                        Text { text: "Webcam"; width: 140px; color: Theme.text; vertical-alignment: center; }
+                        Pill { width: 96px; label: "Off"; selected: !webcam; enabled: can-write; clicked => { set-webcam(false); } }
+                        Pill { width: 96px; label: "On"; selected: webcam; enabled: can-write; clicked => { set-webcam(true); } } }
+                    if has-fn-swap: HorizontalLayout { spacing: 8px; alignment: start;
+                        Text { text: "Bottom-left key"; width: 140px; color: Theme.text; vertical-alignment: center; }
+                        Pill { width: 96px; label: "Fn"; selected: !fn-swap; enabled: can-write; clicked => { set-fn-swap(false); } }
+                        Pill { width: 96px; label: "Win"; selected: fn-swap; enabled: can-write; clicked => { set-fn-swap(true); } } } }
                 Card { title: "THIS LAPTOP";
                     Text { text: model-name; color: Theme.text; font-size: 16px; font-weight: 600; }
                     Text { text: "EC firmware " + firmware; color: Theme.muted; }
+                    if firmware-changed: Text { wrap: word-wrap; color: Theme.warn;
+                        text: "The EC firmware changed (BIOS update?) since this laptop's map was confirmed, so Kestrel is read-only. Check that temperatures and fan speeds on the Dashboard look right, then confirm."; }
+                    if firmware-changed: Pill { width: 220px; label: "Values look right, allow writes"; selected: true; clicked => { confirm-firmware(); } }
                     if connected && !supported: Text { wrap: word-wrap; color: Theme.warn;
                         text: "Unknown model: no register map matches this firmware, so Kestrel only shows system stats."; }
                     if connected && supported && read-only: Text { wrap: word-wrap; color: Theme.warn;
@@ -436,8 +534,16 @@ export component AppWindow inherits Window {
                     HorizontalLayout { spacing: 8px; alignment: start;
                         Pill { width: 230px; label: auto-60hz ? "60 Hz on battery: on" : "60 Hz on battery: off"; selected: auto-60hz;
                             clicked => { auto-60hz = !auto-60hz; set-auto(auto-bat, auto-ac, auto-60hz); } } }
+                    Text { text: "Low battery"; color: Theme.muted; font-size: 12px; }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Pill { width: 80px; label: "Off"; selected: auto-low-pct == 0; clicked => { auto-low-pct = 0; set-low-battery(auto-low-pct, auto-low-scn); } }
+                        for p in [10, 20, 30, 40]: Pill { width: 80px; label: "≤ " + p + " %"; selected: auto-low-pct == p; enabled: supported && !read-only;
+                            clicked => { auto-low-pct = p; set-low-battery(auto-low-pct, auto-low-scn); } } }
+                    if auto-low-pct > 0: HorizontalLayout { spacing: 8px; alignment: start;
+                        for s[i] in scenarios: Pill { width: 110px; label: s.label; selected: auto-low-scn == i; enabled: supported && !read-only;
+                            clicked => { auto-low-scn = i; set-low-battery(auto-low-pct, auto-low-scn); } } }
                     Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
-                        text: "Applied by the tray when you plug in or unplug, so keep kestrel-tray running. 60 Hz returns to the highest rate on AC."; } }
+                        text: "Applied by the tray when you plug in or unplug, so keep kestrel-tray running. 60 Hz returns to the highest rate on AC. The low-battery scenario replaces the battery one until you plug in."; } }
                 Card { title: "AUTO PROFILES";
                     Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
                         text: "While a listed program runs, the tray switches to its scenario, then switches back when it closes."; }
@@ -451,6 +557,23 @@ export component AppWindow inherits Window {
                         for s[i] in scenarios: Pill { width: 100px; label: s.label; selected: rule-scn == i; clicked => { rule-scn = i; } }
                         Pill { width: 80px; label: "Add"; selected: true; enabled: exe-input.text != "";
                             clicked => { add-rule(exe-input.text, rule-scn); exe-input.text = ""; } } } }
+                Card { title: "SCHEDULE";
+                    Text { wrap: word-wrap; color: Theme.muted; font-size: 12px;
+                        text: "Switches scenario when a time window starts (24-hour local time) and switches back when it ends. Program rules above take priority while they run."; }
+                    for r[i] in sched: HorizontalLayout { spacing: 10px; alignment: start;
+                        Text { text: r; color: Theme.text; vertical-alignment: center; min-width: 300px; }
+                        Pill { width: 90px; label: "Remove"; clicked => { remove-sched(i); } } }
+                    HorizontalLayout { spacing: 8px; alignment: start;
+                        Rectangle { width: 80px; height: 34px; border-radius: 8px; background: #0f1115; border-width: 1px; border-color: #2a2f3a;
+                            from-input := TextInput { x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
+                            if from-input.text == "": Text { x: 10px; text: "22:00"; color: Theme.muted; vertical-alignment: center; font-size: 13px; } }
+                        Text { text: "to"; color: Theme.muted; vertical-alignment: center; }
+                        Rectangle { width: 80px; height: 34px; border-radius: 8px; background: #0f1115; border-width: 1px; border-color: #2a2f3a;
+                            to-input := TextInput { x: 10px; width: parent.width - 20px; vertical-alignment: center; color: Theme.text; font-size: 13px; }
+                            if to-input.text == "": Text { x: 10px; text: "07:00"; color: Theme.muted; vertical-alignment: center; font-size: 13px; } }
+                        for s[i] in scenarios: Pill { width: 100px; label: s.label; selected: sched-scn == i; clicked => { sched-scn = i; } }
+                        Pill { width: 80px; label: "Add"; selected: true; enabled: from-input.text != "" && to-input.text != "";
+                            clicked => { add-sched(from-input.text, to-input.text, sched-scn); } } } }
                 Card { title: "WHEN I CLOSE THE LID";
                     Text { text: "On battery"; color: Theme.muted; font-size: 12px; }
                     HorizontalLayout { spacing: 8px; alignment: start;
