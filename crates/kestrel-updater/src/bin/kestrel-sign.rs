@@ -32,17 +32,10 @@ fn main() {
             serde_json::json!({ "name": n, "sha256": kestrel_updater::sha256_hex(&data) })
         })
         .collect();
-    let manifest =
-        serde_json::to_vec_pretty(&serde_json::json!({ "version": version, "files": entries }))
-            .unwrap();
+    let manifest = serde_json::to_vec_pretty(&serde_json::json!({ "version": version, "files": entries })).unwrap();
     let dir = std::path::Path::new(&dir);
     std::fs::write(dir.join("manifest.json"), &manifest).unwrap();
     std::fs::write(dir.join("manifest.json.sig"), sk.sign(&manifest).to_bytes()).unwrap();
-    let pk: String = sk
-        .verifying_key()
-        .to_bytes()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let pk: String = sk.verifying_key().to_bytes().iter().map(|b| format!("{b:02x}")).collect();
     println!("signed {} files; public key {pk}", files.len());
 }

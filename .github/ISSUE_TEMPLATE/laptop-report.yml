@@ -1,0 +1,55 @@
+name: Laptop report
+description: Tell us how Kestrel works on your MSI laptop, so it can be verified and unlocked.
+title: "[Laptop] <model>"
+labels: ["laptop-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. Close MSI Center first, then run **Start Kestrel.cmd**.
+        The first line in the Kestrel service window looks like
+        `kestrel-svc 0.1.0: firmware "15MMIMS1.103" map Some("VECTOR_A16_HX_A8W") read_only=false`.
+  - type: input
+    id: model
+    attributes:
+      label: Laptop model
+      placeholder: "MSI Vector A16 HX A8WIG"
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: First line of the Kestrel service window
+      placeholder: 'kestrel-svc 0.1.0: firmware "..." map ... read_only=...'
+    validations:
+      required: true
+  - type: input
+    id: cpu_gpu
+    attributes:
+      label: CPU and GPU
+      placeholder: "Ryzen 9 7945HX, RTX 4070 Laptop"
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What works
+      description: Tick only what you tried and saw working.
+      options:
+        - label: Temperatures and fan RPM look right
+        - label: Scenario switching (fans/performance change)
+        - label: Cooler Boost on and off
+        - label: Fan curve applies
+        - label: Battery charge limit
+        - label: Keyboard backlight / RGB
+        - label: 60 Hz on battery
+        - label: Lid-close action
+        - label: Driver updates list
+  - type: textarea
+    id: problems
+    attributes:
+      label: What didn't work
+      description: Error banners, wrong values, or anything odd. Screenshots help.
+  - type: input
+    id: kestrel
+    attributes:
+      label: Kestrel version
+      placeholder: "Beta 4"

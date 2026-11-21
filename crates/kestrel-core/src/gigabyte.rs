@@ -175,6 +175,12 @@ impl Laptop for Gigabyte {
             cooler_boost: true,
             charge_limit: true,
             fan_curve: true,
+            curve_points: CURVE_POINTS,
+            scenarios: if self.has_nv_target {
+                Scenario::ALL.to_vec()
+            } else {
+                vec![Scenario::Extreme, Scenario::Balanced]
+            },
             ..Default::default()
         }
     }
@@ -303,6 +309,10 @@ impl Laptop for Gigabyte {
             return Err(e);
         }
         Ok(None)
+    }
+
+    fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
     }
 
     fn restore(&mut self) -> Result<usize> {

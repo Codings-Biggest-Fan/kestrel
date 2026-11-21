@@ -8,6 +8,7 @@
 //!   (mock modes also simulate a Sound BlasterX G6)
 //!   kestrel-svc install|uninstall  register / remove the Windows service
 
+mod cpu_power;
 mod drivers;
 #[cfg(windows)]
 mod hid_win;
@@ -62,6 +63,7 @@ fn main() {
 
 pub fn run(mock_fw: Option<String>) -> Result<(), String> {
     let mock = mock_fw.is_some();
+    cpu_power::MOCK.store(mock, std::sync::atomic::Ordering::Relaxed);
     let mut st = init(mock_fw);
     st.audio = open_audio(mock).map(server::Audio::new);
     let state = Arc::new(Mutex::new(st));
@@ -146,7 +148,7 @@ fn open_audio(mock: bool) -> Option<SoundBlaster> {
 }
 
 fn init(mock_fw: Option<String>) -> State {
-    let settings = settings::Settings::load();
+    let mut settings = settings::Settings::load();
     if let Some((io, ident)) = open_gigabyte(mock_fw.as_deref()) {
         return init_gigabyte(&settings, io, ident, mock_fw.is_some());
     }
@@ -165,11 +167,30 @@ fn init(mock_fw: Option<String>) -> State {
                     model.name = m.firmware.models.clone();
                     model.map_id = Some(m.conf.id.clone());
                     model.wmi = Some(m.conf.wmi);
-                    model.read_only = !allowed;
+                    // A BIOS/EC update can move registers even when the prefix still matches.
+                    let mut changed =
+                        allowed && settings.known_firmware.as_deref().is_some_and(|k| k != fw);
+                    if allowed && settings.known_firmware.is_none() {
+                        settings.known_firmware = Some(fw.clone());
+                        if let Err(e) = settings.save() {
+                            // Without a saved baseline a later update would go unnoticed.
+                            eprintln!("couldn't save settings: {e}");
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        eprintln!(
+                            "EC firmware changed since it was confirmed; read-only until confirmed"
+                        );
+                    }
+                    model.firmware_changed = changed;
+                    model.read_only = !allowed || changed;
                     let journal = Journal::open(settings::data_dir().join("journal.json"))
                         .unwrap_or_default();
-                    Some(Box::new(MsiEc::new(io, m.conf.clone(), journal, !allowed))
-                        as Box<dyn Laptop>)
+                    Some(
+                        Box::new(MsiEc::new(io, m.conf.clone(), journal, model.read_only))
+                            as Box<dyn Laptop>,
+                    )
                 }
                 None => {
                     model.name = "Unknown model".into();
@@ -237,6 +258,7 @@ fn init_gigabyte(
         map_id: Some("gigabyte-wmi".into()),
         wmi: None,
         read_only: !allowed,
+        ..Default::default()
     };
     // A mock must never leave simulated values in the real hardware journal.
     let journal = if mock {

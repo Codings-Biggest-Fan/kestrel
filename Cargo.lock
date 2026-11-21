@@ -2271,6 +2271,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-cli"
+version = "0.1.0"
+dependencies = [
+ "kestrel-core",
+]
+
+[[package]]
 name = "kestrel-core"
 version = "0.1.0"
 dependencies = [

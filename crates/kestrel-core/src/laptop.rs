@@ -30,6 +30,18 @@ pub trait Laptop: Send {
     fn charge_limit(&mut self) -> Result<Option<u8>> {
         Err(EcError::Unsupported("charge limit"))
     }
+    fn webcam(&mut self) -> Result<bool> {
+        Err(EcError::Unsupported("webcam switch"))
+    }
+    fn set_webcam(&mut self, _on: bool) -> Result<()> {
+        Err(EcError::Unsupported("webcam switch"))
+    }
+    fn fn_win_swap(&mut self) -> Result<bool> {
+        Err(EcError::Unsupported("Fn/Win swap"))
+    }
+    fn set_fn_win_swap(&mut self, _on: bool) -> Result<()> {
+        Err(EcError::Unsupported("Fn/Win swap"))
+    }
     fn set_charge_limit(&mut self, _pct: u8) -> Result<()> {
         Err(EcError::Unsupported("charge limit"))
     }
@@ -50,6 +62,8 @@ pub trait Laptop: Send {
     }
     /// Put every setting Kestrel changed back; returns how many were restored.
     fn restore(&mut self) -> Result<usize>;
+    /// Enable or disable writes (e.g. after the owner confirms a firmware change).
+    fn set_read_only(&mut self, read_only: bool);
     /// One line of raw state for the service log after each change.
     fn debug_line(&mut self) -> String {
         String::new()
@@ -70,10 +84,17 @@ impl Laptop for MsiEc {
                 .map(|m| m.modes.keys().cloned().collect())
                 .unwrap_or_default(),
             fan_curve: c.fan_curve.is_some(),
+            scenarios: Scenario::available(c),
+            curve_points: c.fan_curve.map_or(0, |f| f.points),
+            webcam: c.webcam.and_then(|w| w.address).is_some(),
+            fn_win_swap: c.fn_win_swap.and_then(|f| f.address).is_some(),
         }
     }
 
     fn apply_scenario(&mut self, s: Scenario) -> Result<()> {
+        if !Scenario::available(self.conf()).contains(&s) {
+            return Err(EcError::Unsupported(s.label()));
+        }
         let shift = self.conf().shift_mode.clone();
         let fan = self.conf().fan_mode.clone();
         if let Some(name) = shift.and_then(|m| {
@@ -150,6 +171,21 @@ impl Laptop for MsiEc {
 
     fn restore(&mut self) -> Result<usize> {
         MsiEc::restore(self)
+    }
+    fn set_read_only(&mut self, read_only: bool) {
+        MsiEc::set_read_only(self, read_only)
+    }
+    fn webcam(&mut self) -> Result<bool> {
+        MsiEc::webcam(self)
+    }
+    fn set_webcam(&mut self, on: bool) -> Result<()> {
+        MsiEc::set_webcam(self, on)
+    }
+    fn fn_win_swap(&mut self) -> Result<bool> {
+        MsiEc::fn_win_swap(self)
+    }
+    fn set_fn_win_swap(&mut self, on: bool) -> Result<()> {
+        MsiEc::set_fn_win_swap(self, on)
     }
 
     fn debug_line(&mut self) -> String {

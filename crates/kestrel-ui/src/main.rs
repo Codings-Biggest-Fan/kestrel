@@ -1,13 +1,14 @@
 //! kestrel-ui: main window. Talks to kestrel-svc over IPC and exits when closed.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use kestrel_core::automation::{AppRule, Automation};
+use kestrel_core::automation::{fmt_hhmm, parse_hhmm, AppRule, Automation, BatteryRule, TimeRule};
 use kestrel_core::creative::{AudioSetting, Effect, Output};
 use kestrel_core::ipc::{Request, Response, Status};
+use kestrel_core::profiles::{self, Profile};
 use kestrel_core::scenario::Scenario;
 use slint::{Model, ModelRc, SharedString, VecModel, Weak};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 slint::include_modules!();
@@ -68,8 +69,20 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
     });
     ui.set_firmware(s.model.firmware.clone().into());
     ui.set_read_only(s.model.read_only);
+    ui.set_firmware_changed(s.model.firmware_changed);
     ui.set_supported(s.model.map_id.is_some());
-    ui.set_scenario(s.scenario.map(|x| x.index() as i32).unwrap_or(-1));
+    if !s.caps.scenarios.is_empty()
+        && *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) != s.caps.scenarios
+    {
+        show_scenarios(ui, s.caps.scenarios.clone());
+    }
+    if CURVE_POINTS.swap(s.caps.curve_points.into(), Ordering::Relaxed)
+        != u64::from(s.caps.curve_points)
+        || ui.get_profiles().row_count() == 0
+    {
+        show_profiles(ui);
+    }
+    ui.set_scenario(shown_index(s.scenario));
     ui.set_cpu_temp(opt(s.cpu_temp, ""));
     ui.set_gpu_temp(opt(s.gpu_temp, ""));
     ui.set_cpu_temp_f(s.cpu_temp.unwrap_or(0) as f32 / 100.0);
@@ -108,12 +121,19 @@ fn apply(ui: &AppWindow, s: &Status, temps: &VecDeque<f32>, loads: &VecDeque<f32
         .into(),
     );
     ui.set_has_boost(s.caps.cooler_boost);
+    ui.set_has_webcam(s.caps.webcam);
+    ui.set_webcam(s.webcam.unwrap_or(false));
+    ui.set_has_fn_swap(s.caps.fn_win_swap);
+    ui.set_fn_swap(s.fn_win_swap.unwrap_or(false));
     if s.caps.fan_curve && !ui.get_has_curve() {
         ui.invoke_load_curve(ui.get_curve_gpu());
     }
     ui.set_has_curve(s.caps.fan_curve);
     ui.set_cooler_boost(s.cooler_boost.unwrap_or(false));
     ui.set_has_charge(s.caps.charge_limit);
+    if !CPU_LOADED.swap(true, Ordering::Relaxed) {
+        load_cpu_power(ui.as_weak());
+    }
     ui.set_charge_limit(s.charge_limit.unwrap_or(100) as i32);
     ui.set_has_kbd(s.caps.kbd_backlight);
     ui.set_kbd_level(s.kbd_backlight.map(i32::from).unwrap_or(-1));
@@ -196,12 +216,6 @@ fn send(weak: Weak<AppWindow>, req: Request) {
     });
 }
 
-fn ints(v: &[u8]) -> ModelRc<i32> {
-    ModelRc::new(VecModel::from(
-        v.iter().map(|&x| i32::from(x)).collect::<Vec<_>>(),
-    ))
-}
-
 const SWATCHES: [[u8; 3]; 8] = [
     [255, 32, 32],
     [255, 128, 0],
@@ -241,6 +255,22 @@ fn show_rules(ui: &AppWindow, rules: &[AppRule]) {
         .map(|r| format!("{}  →  {}", r.exe, r.scenario.label()).into())
         .collect();
     ui.set_rules(ModelRc::new(VecModel::from(items)));
+}
+
+fn show_sched(ui: &AppWindow, rules: &[TimeRule]) {
+    let items: Vec<SharedString> = rules
+        .iter()
+        .map(|r| {
+            format!(
+                "{} – {}  →  {}",
+                fmt_hhmm(r.start),
+                fmt_hhmm(r.end),
+                r.scenario.label()
+            )
+            .into()
+        })
+        .collect();
+    ui.set_sched(ModelRc::new(VecModel::from(items)));
 }
 
 fn load_lid(weak: Weak<AppWindow>) {
@@ -343,8 +373,7 @@ fn load_curve(weak: Weak<AppWindow>, gpu: bool) {
         let _ = weak.upgrade_in_event_loop(move |ui| match r {
             _ if CURVE_GEN.load(Ordering::SeqCst) != generation || ui.get_curve_gpu() != gpu => {}
             Ok(Response::FanCurve { temps, speeds }) => {
-                ui.set_curve_temps(ints(&temps));
-                ui.set_curve_speeds(ints(&speeds));
+                show_curve(&ui, &temps, &speeds);
                 ui.set_curve_ready(true);
             }
             Ok(Response::Error(e)) => ui.set_message(e.into()),
@@ -353,6 +382,69 @@ fn load_curve(weak: Weak<AppWindow>, gpu: bool) {
         });
     });
 }
+
+/// x of each point as a fraction of the graph width: temperature on a 20–100 °C axis,
+/// or evenly spaced if the firmware's temperatures are missing.
+fn curve_xs(temps: &[i32], n: usize) -> Vec<f32> {
+    if temps.len() == n && n > 0 {
+        temps
+            .iter()
+            .map(|&t| ((t as f32 - 20.0) / 80.0).clamp(0.03, 0.97))
+            .collect()
+    } else {
+        (0..n).map(|i| (i as f32 + 0.5) / n.max(1) as f32).collect()
+    }
+}
+
+/// Graph size in pixels; Slint keeps a path's aspect ratio, so paths are drawn in pixels.
+static GRAPH: std::sync::Mutex<(f32, f32)> = std::sync::Mutex::new((100.0, 100.0));
+
+/// SVG paths in a w×h viewbox: the curve held flat to both edges, and the area under it.
+fn curve_paths(xs: &[f32], speeds: &[i32]) -> (String, String) {
+    if xs.is_empty() || xs.len() != speeds.len() {
+        return (String::new(), String::new());
+    }
+    let (w, h) = *GRAPH.lock().unwrap_or_else(|p| p.into_inner());
+    let pt = |x: f32, v: i32| {
+        format!(
+            "{:.2} {:.2}",
+            x * w,
+            h * (1.0 - v.clamp(0, 100) as f32 / 100.0)
+        )
+    };
+    let mut line = format!("M {}", pt(0.0, speeds[0]));
+    for (x, v) in xs.iter().zip(speeds) {
+        line += &format!(" L {}", pt(*x, *v));
+    }
+    line += &format!(" L {}", pt(1.0, speeds[speeds.len() - 1]));
+    let fill = format!("{line} L {w:.2} {h:.2} L 0 {h:.2} Z");
+    (line, fill)
+}
+
+fn show_curve(ui: &AppWindow, temps: &[u8], speeds: &[u8]) {
+    let temps: Vec<i32> = temps.iter().map(|&t| i32::from(t)).collect();
+    let speeds: Vec<i32> = speeds.iter().map(|&v| i32::from(v)).collect();
+    let xs = curve_xs(&temps, speeds.len());
+    let (line, fill) = curve_paths(&xs, &speeds);
+    ui.set_curve_temps(ModelRc::new(VecModel::from(temps)));
+    ui.set_curve_speeds(ModelRc::new(VecModel::from(speeds)));
+    ui.set_curve_xs(ModelRc::new(VecModel::from(xs)));
+    ui.set_curve_line(line.into());
+    ui.set_curve_fill(fill.into());
+}
+
+/// Moves point `i` to `v` and pushes its neighbours so the curve stays non-decreasing.
+fn drag_point(speeds: &mut [i32], i: usize, v: i32) {
+    speeds[i] = v;
+    for s in &mut speeds[i + 1..] {
+        *s = (*s).max(v);
+    }
+    for s in &mut speeds[..i] {
+        *s = (*s).min(v);
+    }
+}
+
+static DRAG_I: AtomicU64 = AtomicU64::new(0);
 
 /// Clamp to 0-100 and make the curve non-decreasing, as the service requires.
 fn monotonic(speeds: impl Iterator<Item = i32>) -> Vec<u8> {
@@ -365,26 +457,168 @@ fn monotonic(speeds: impl Iterator<Item = i32>) -> Vec<u8> {
         .collect()
 }
 
-fn main() -> Result<(), slint::PlatformError> {
-    let ui = AppWindow::new()?;
-    let items: Vec<ScenarioItem> = Scenario::ALL
+/// Scenarios the UI lists; UI indices refer to this, not to `Scenario::ALL`.
+static SHOWN: std::sync::Mutex<Vec<Scenario>> = std::sync::Mutex::new(Vec::new());
+
+fn shown_index(s: Option<Scenario>) -> i32 {
+    let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner());
+    s.and_then(|s| shown.iter().position(|&x| x == s))
+        .map_or(-1, |i| i as i32)
+}
+
+fn shown_at(i: i32) -> Option<Scenario> {
+    let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner());
+    usize::try_from(i).ok().and_then(|i| shown.get(i).copied())
+}
+
+fn show_scenarios(ui: &AppWindow, list: Vec<Scenario>) {
+    let items: Vec<ScenarioItem> = list
         .iter()
         .map(|&s| ScenarioItem {
             label: s.label().into(),
             hint: hint(s).into(),
         })
         .collect();
+    *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) = list;
     ui.set_scenarios(ModelRc::new(VecModel::from(items)));
+    let auto = Automation::load();
+    ui.set_auto_bat(shown_index(auto.battery_scenario));
+    ui.set_auto_ac(shown_index(auto.ac_scenario));
+    ui.set_auto_low_scn(shown_index(auto.low_battery.map(|r| r.scenario)));
+}
+
+static CURVE_POINTS: AtomicU64 = AtomicU64::new(0);
+static CPU_OK: AtomicBool = AtomicBool::new(false);
+static CPU_LOADED: AtomicBool = AtomicBool::new(false);
+/// Limits applied from the CPU card this session; "Save current" stores them in the profile.
+static LAST_CPU: std::sync::Mutex<Option<(u32, u32)>> = std::sync::Mutex::new(None);
+
+fn load_cpu_power(weak: Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        let r = kestrel_core::transport::client().and_then(|mut c| c.call(&Request::GetCpuPower));
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            let Ok(Response::CpuPower(i)) = r else { return };
+            CPU_OK.store(i.supported, Ordering::Relaxed);
+            ui.set_cpu_ok(i.supported);
+            ui.set_cpu_name(i.cpu.into());
+            ui.set_cpu_note(i.note.into());
+            if let (Some(s), Some(b)) = (i.sustained_w, i.boost_w) {
+                ui.set_cpu_sustained(s as i32);
+                ui.set_cpu_boost(b as i32);
+            }
+            show_profiles(&ui);
+        });
+    });
+}
+
+fn cpu_command(weak: Weak<AppWindow>, req: Request, applied: Option<(u32, u32)>) {
+    std::thread::spawn(move || {
+        let r = kestrel_core::transport::client().and_then(|mut c| c.command(&req));
+        let _ = weak.upgrade_in_event_loop(move |ui| match r {
+            Ok(()) => {
+                *LAST_CPU.lock().unwrap_or_else(|p| p.into_inner()) = applied;
+                ui.set_message(SharedString::new());
+                load_cpu_power(ui.as_weak());
+            }
+            Err(e) => ui.set_message(e.to_string().into()),
+        });
+    });
+}
+/// Profiles as listed: presets for this model first, then the user's own.
+static PROFILES: std::sync::Mutex<Vec<(Profile, bool)>> = std::sync::Mutex::new(Vec::new());
+
+fn show_profiles(ui: &AppWindow) {
+    let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    let points = CURVE_POINTS.load(Ordering::Relaxed) as usize;
+    let mut list: Vec<(Profile, bool)> =
+        profiles::presets(&shown, points, CPU_OK.load(Ordering::Relaxed))
+            .into_iter()
+            .map(|p| (p, true))
+            .collect();
+    list.extend(
+        profiles::load()
+            .into_iter()
+            .filter(|p| shown.contains(&p.scenario))
+            .map(|p| (p, false)),
+    );
+    let items: Vec<ProfileItem> = list
+        .iter()
+        .map(|(p, preset)| ProfileItem {
+            name: p.name.clone().into(),
+            desc: profiles::describe(p).into(),
+            preset: *preset,
+        })
+        .collect();
+    *PROFILES.lock().unwrap_or_else(|p| p.into_inner()) = list;
+    ui.set_profiles(ModelRc::new(VecModel::from(items)));
+}
+
+fn save_profile(weak: Weak<AppWindow>, name: String, curves: bool) {
+    std::thread::spawn(move || {
+        let r = (|| -> std::io::Result<Profile> {
+            let mut c = kestrel_core::transport::client()?;
+            let st = c.status()?;
+            let scenario = st.scenario.ok_or_else(|| {
+                std::io::Error::other("Choose a scenario first, then save the profile.")
+            })?;
+            let curve = |c: &mut kestrel_core::ipc::Client<kestrel_core::transport::Stream>,
+                         gpu| match c.call(&Request::GetFanCurve { gpu })? {
+                Response::FanCurve { speeds, .. } => Ok(Some(speeds)),
+                Response::Error(e) => Err(std::io::Error::other(e)),
+                other => Err(std::io::Error::other(format!(
+                    "unexpected reply: {other:?}"
+                ))),
+            };
+            let (cpu_curve, gpu_curve) = if curves && st.caps.fan_curve {
+                (curve(&mut c, false)?, curve(&mut c, true)?)
+            } else {
+                (None, None)
+            };
+            Ok(Profile {
+                name,
+                scenario,
+                cooler_boost: st.cooler_boost.unwrap_or(false),
+                cpu_curve,
+                gpu_curve,
+                cpu_power: *LAST_CPU.lock().unwrap_or_else(|p| p.into_inner()),
+            })
+        })();
+        let _ = weak.upgrade_in_event_loop(move |ui| match r {
+            Ok(p) => {
+                let mut list = profiles::load();
+                list.retain(|x| x.name != p.name);
+                list.push(p);
+                match profiles::save(&list) {
+                    Ok(()) => {
+                        ui.set_message(SharedString::new());
+                        ui.set_profile_name(SharedString::new());
+                    }
+                    Err(e) => ui.set_message(e.to_string().into()),
+                }
+                show_profiles(&ui);
+            }
+            Err(e) => ui.set_message(e.to_string().into()),
+        });
+    });
+}
+
+fn main() -> Result<(), slint::PlatformError> {
+    let ui = AppWindow::new()?;
+    show_scenarios(&ui, Scenario::ALL.to_vec());
     ui.set_track(arc(1.0));
 
     let w = ui.as_weak();
     ui.on_set_scenario(move |i| {
-        if let Some(s) = Scenario::from_index(i as usize) {
+        if let Some(s) = shown_at(i) {
             send(w.clone(), Request::SetScenario(s));
         }
     });
     let w = ui.as_weak();
     ui.on_set_boost(move |on| send(w.clone(), Request::SetCoolerBoost(on)));
+    let w = ui.as_weak();
+    ui.on_set_webcam(move |on| send(w.clone(), Request::SetWebcam(on)));
+    let w = ui.as_weak();
+    ui.on_set_fn_swap(move |on| send(w.clone(), Request::SetFnWinSwap(on)));
     let w = ui.as_weak();
     ui.on_set_charge(move |p| send(w.clone(), Request::SetChargeLimit(p.clamp(10, 100) as u8)));
     let w = ui.as_weak();
@@ -411,16 +645,35 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     load_lights(ui.as_weak());
     let auto = Automation::load();
-    let idx = |s: Option<Scenario>| s.map_or(-1, |s| s.index() as i32);
-    ui.set_auto_bat(idx(auto.battery_scenario));
-    ui.set_auto_ac(idx(auto.ac_scenario));
     ui.set_auto_60hz(auto.battery_60hz);
+    ui.set_auto_low_pct(auto.low_battery.map_or(0, |r| r.below_pct as i32));
+    let w = ui.as_weak();
+    ui.on_set_low_battery(move |pct, scn| {
+        let rule = shown_at(scn)
+            .filter(|_| pct > 0)
+            .map(|scenario| BatteryRule {
+                below_pct: pct.clamp(1, 100) as u8,
+                scenario,
+            });
+        let a = Automation {
+            low_battery: rule,
+            ..Automation::load()
+        };
+        let msg: SharedString = a
+            .save()
+            .err()
+            .map(|e| format!("Could not save automation: {e}"))
+            .unwrap_or_default()
+            .into();
+        if let Some(ui) = w.upgrade() {
+            ui.set_message(msg);
+        }
+    });
     let w = ui.as_weak();
     ui.on_set_auto(move |bat, ac, hz60| {
-        let pick = |i: i32| usize::try_from(i).ok().and_then(Scenario::from_index);
         let a = Automation {
-            battery_scenario: pick(bat),
-            ac_scenario: pick(ac),
+            battery_scenario: shown_at(bat),
+            ac_scenario: shown_at(ac),
             battery_60hz: hz60,
             ..Automation::load()
         };
@@ -447,6 +700,54 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     load_lid(ui.as_weak());
     show_rules(&ui, &auto.app_rules);
+    show_sched(&ui, &auto.schedule);
+    let w = ui.as_weak();
+    ui.on_add_sched(move |from, to, scenario| {
+        let Some(ui) = w.upgrade() else { return };
+        let (Some(start), Some(end)) = (parse_hhmm(&from), parse_hhmm(&to)) else {
+            ui.set_message("Enter times as HH:MM, for example 22:00.".into());
+            return;
+        };
+        if start == end {
+            ui.set_message("The start and end times must differ.".into());
+            return;
+        }
+        let Some(scenario) = shown_at(scenario) else {
+            return;
+        };
+        let mut a = Automation::load();
+        a.schedule.push(TimeRule {
+            start,
+            end,
+            scenario,
+        });
+        ui.set_message(
+            a.save()
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default()
+                .into(),
+        );
+        show_sched(&ui, &a.schedule);
+    });
+    let w = ui.as_weak();
+    ui.on_remove_sched(move |i| {
+        let Some(ui) = w.upgrade() else { return };
+        let mut a = Automation::load();
+        if let Ok(i) = usize::try_from(i) {
+            if i < a.schedule.len() {
+                a.schedule.remove(i);
+            }
+        }
+        ui.set_message(
+            a.save()
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default()
+                .into(),
+        );
+        show_sched(&ui, &a.schedule);
+    });
     let w = ui.as_weak();
     ui.on_add_rule(move |exe, scenario| {
         let Some(ui) = w.upgrade() else { return };
@@ -456,10 +757,7 @@ fn main() -> Result<(), slint::PlatformError> {
         } else {
             format!("{exe}.exe")
         };
-        let Some(scenario) = usize::try_from(scenario)
-            .ok()
-            .and_then(Scenario::from_index)
-        else {
+        let Some(scenario) = shown_at(scenario) else {
             return;
         };
         if exe == ".exe" {
@@ -548,11 +846,135 @@ fn main() -> Result<(), slint::PlatformError> {
     let w = ui.as_weak();
     ui.on_load_curve(move |gpu| load_curve(w.clone(), gpu));
     let w = ui.as_weak();
+    ui.on_apply_profile(move |i| {
+        let Some(p) = usize::try_from(i).ok().and_then(|i| {
+            PROFILES
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(i)
+                .map(|x| x.0.clone())
+        }) else {
+            return;
+        };
+        let w = w.clone();
+        std::thread::spawn(move || {
+            let r = kestrel_core::transport::client().and_then(|mut c| {
+                profiles::requests(&p)
+                    .iter()
+                    .try_for_each(|req| c.command(req))
+            });
+            if r.is_ok() && p.cpu_power.is_some() {
+                *LAST_CPU.lock().unwrap_or_else(|p| p.into_inner()) = p.cpu_power;
+            }
+            let msg: SharedString = r
+                .err()
+                .map(|e| format!("{}: {e}", p.name))
+                .unwrap_or_default()
+                .into();
+            let gpu = w.upgrade().is_some_and(|ui| ui.get_curve_gpu());
+            let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
+            load_curve(w, gpu);
+        });
+    });
+    let w = ui.as_weak();
+    ui.on_set_cpu_power(move |s, b| {
+        let (s, b) = kestrel_core::cpu_power::clamp(s.max(0) as u32, b.max(0) as u32);
+        cpu_command(
+            w.clone(),
+            Request::SetCpuPower {
+                sustained_w: s,
+                boost_w: b,
+            },
+            Some((s, b)),
+        );
+    });
+    let w = ui.as_weak();
+    ui.on_confirm_firmware(move || {
+        let w = w.clone();
+        std::thread::spawn(move || {
+            let r = kestrel_core::transport::client()
+                .and_then(|mut c| c.command(&Request::ConfirmFirmware));
+            let msg: SharedString = r.err().map(|e| e.to_string()).unwrap_or_default().into();
+            let _ = w.upgrade_in_event_loop(move |ui| ui.set_message(msg));
+        });
+    });
+    let w = ui.as_weak();
+    ui.on_reset_cpu_power(move || cpu_command(w.clone(), Request::ResetCpuPower, None));
+    let w = ui.as_weak();
+    ui.on_delete_profile(move |i| {
+        let Some(ui) = w.upgrade() else { return };
+        let Some((p, false)) = usize::try_from(i).ok().and_then(|i| {
+            PROFILES
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(i)
+                .cloned()
+        }) else {
+            return;
+        };
+        let mut list = profiles::load();
+        list.retain(|x| x.name != p.name);
+        ui.set_message(
+            profiles::save(&list)
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default()
+                .into(),
+        );
+        show_profiles(&ui);
+    });
+    let w = ui.as_weak();
+    ui.on_save_profile(move |name, curves| {
+        let name = name.trim().to_string();
+        if !name.is_empty() {
+            save_profile(w.clone(), name, curves);
+        }
+    });
+    let w = ui.as_weak();
+    ui.on_curve_resize(move |gw, gh| {
+        let Some(ui) = w.upgrade() else { return };
+        *GRAPH.lock().unwrap_or_else(|p| p.into_inner()) = (gw.max(1.0), gh.max(1.0));
+        let xs: Vec<f32> = ui.get_curve_xs().iter().collect();
+        let speeds: Vec<i32> = ui.get_curve_speeds().iter().collect();
+        let (line, fill) = curve_paths(&xs, &speeds);
+        ui.set_curve_line(line.into());
+        ui.set_curve_fill(fill.into());
+    });
+    let w = ui.as_weak();
+    ui.on_curve_drag(move |down, fx, fy| {
+        let Some(ui) = w.upgrade() else { return };
+        let xs: Vec<f32> = ui.get_curve_xs().iter().collect();
+        let mut speeds: Vec<i32> = ui.get_curve_speeds().iter().collect();
+        if speeds.is_empty() || xs.len() != speeds.len() {
+            return;
+        }
+        if down {
+            let near = xs
+                .iter()
+                .enumerate()
+                .min_by(|a, b| (a.1 - fx).abs().total_cmp(&(b.1 - fx).abs()))
+                .map_or(0, |(i, _)| i);
+            DRAG_I.store(near as u64, Ordering::Relaxed);
+        }
+        let i = (DRAG_I.load(Ordering::Relaxed) as usize).min(speeds.len() - 1);
+        let v = (((1.0 - fy) * 20.0).round() as i32 * 5).clamp(0, 100);
+        drag_point(&mut speeds, i, v);
+        let (line, fill) = curve_paths(&xs, &speeds);
+        ui.set_curve_speeds(ModelRc::new(VecModel::from(speeds)));
+        ui.set_curve_line(line.into());
+        ui.set_curve_fill(fill.into());
+    });
+    let w = ui.as_weak();
     ui.on_apply_curve(move |gpu, m| {
         let speeds = monotonic(m.iter());
         let w = w.clone();
         if let Some(ui) = w.upgrade() {
-            ui.set_curve_speeds(ints(&speeds));
+            let temps: Vec<u8> = ui
+                .get_curve_temps()
+                .iter()
+                .map(|t| t.clamp(0, 255) as u8)
+                .collect();
+            show_curve(&ui, &temps, &speeds);
         }
         std::thread::spawn(move || {
             let r = kestrel_core::transport::client()
@@ -605,5 +1027,31 @@ mod win {
         ] {
             unsafe { DwmSetWindowAttribute(hwnd, attr, &val as *const u32 as _, 4) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dragging_keeps_curve_rising() {
+        let mut s = vec![20, 30, 40, 50, 60, 70];
+        drag_point(&mut s, 2, 80);
+        assert_eq!(s, vec![20, 30, 80, 80, 80, 80]);
+        drag_point(&mut s, 4, 10);
+        assert_eq!(s, vec![10, 10, 10, 10, 10, 80]);
+    }
+
+    #[test]
+    fn paths_span_the_graph() {
+        let xs = curve_xs(&[40, 60], 2);
+        assert_eq!(xs, vec![0.25, 0.5]);
+        let (line, fill) = curve_paths(&xs, &[30, 90]);
+        assert_eq!(
+            line,
+            "M 0.00 70.00 L 25.00 70.00 L 50.00 10.00 L 100.00 10.00"
+        );
+        assert!(fill.ends_with("L 100.00 100.00 L 0 100.00 Z"));
     }
 }

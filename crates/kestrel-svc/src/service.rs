@@ -4,8 +4,8 @@ use crate::SERVICE_NAME;
 use std::ffi::OsString;
 use std::time::Duration;
 use windows_service::service::{
-    ServiceAccess, ServiceControl, ServiceControlAccept, ServiceErrorControl, ServiceExitCode,
-    ServiceInfo, ServiceStartType, ServiceState, ServiceStatus, ServiceType,
+    ServiceAccess, ServiceControl, ServiceControlAccept, ServiceErrorControl, ServiceExitCode, ServiceInfo,
+    ServiceStartType, ServiceState, ServiceStatus, ServiceType,
 };
 use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
@@ -23,9 +23,7 @@ fn service_main(_args: Vec<OsString>) {
         ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
         _ => ServiceControlHandlerResult::NotImplemented,
     };
-    let Ok(status) = service_control_handler::register(SERVICE_NAME, handler) else {
-        return;
-    };
+    let Ok(status) = service_control_handler::register(SERVICE_NAME, handler) else { return };
     let _ = status.set_service_status(ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
         current_state: ServiceState::Running,
@@ -41,11 +39,8 @@ fn service_main(_args: Vec<OsString>) {
 }
 
 pub fn install() -> Result<(), String> {
-    let mgr = ServiceManager::local_computer(
-        None::<&str>,
-        ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
-    )
-    .map_err(|e| e.to_string())?;
+    let mgr = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE)
+        .map_err(|e| e.to_string())?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let info = ServiceInfo {
         name: SERVICE_NAME.into(),
@@ -59,21 +54,15 @@ pub fn install() -> Result<(), String> {
         account_name: None, // LocalSystem
         account_password: None,
     };
-    let svc = mgr
-        .create_service(&info, ServiceAccess::START | ServiceAccess::CHANGE_CONFIG)
-        .map_err(|e| e.to_string())?;
+    let svc = mgr.create_service(&info, ServiceAccess::START | ServiceAccess::CHANGE_CONFIG).map_err(|e| e.to_string())?;
     let _ = svc.set_description("Fans, scenarios, battery and sensors for MSI laptops");
     svc.start::<&str>(&[]).map_err(|e| e.to_string())
 }
 
 pub fn uninstall() -> Result<(), String> {
-    let mgr = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
-        .map_err(|e| e.to_string())?;
+    let mgr = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT).map_err(|e| e.to_string())?;
     let svc = mgr
-        .open_service(
-            SERVICE_NAME,
-            ServiceAccess::STOP | ServiceAccess::DELETE | ServiceAccess::QUERY_STATUS,
-        )
+        .open_service(SERVICE_NAME, ServiceAccess::STOP | ServiceAccess::DELETE | ServiceAccess::QUERY_STATUS)
         .map_err(|e| e.to_string())?;
     let _ = svc.stop();
     svc.delete().map_err(|e| e.to_string())

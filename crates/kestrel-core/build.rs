@@ -21,9 +21,5 @@ fn main() {
         writeln!(out, "    include_str!({:?}),", f.canonicalize().unwrap()).unwrap();
     }
     out.push_str("];\n");
-    fs::write(
-        Path::new(&env::var("OUT_DIR").unwrap()).join("models.rs"),
-        out,
-    )
-    .unwrap();
+    fs::write(Path::new(&env::var("OUT_DIR").unwrap()).join("models.rs"), out).unwrap();
 }

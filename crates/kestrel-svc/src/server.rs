@@ -72,6 +72,18 @@ fn handle(mut stream: Stream, state: Shared) {
     }
     while let Ok(req) = read_frame::<_, Request>(&mut stream) {
         let resp = match req {
+            Request::GetCpuPower => Response::CpuPower(crate::cpu_power::info()),
+            Request::SetCpuPower {
+                sustained_w,
+                boost_w,
+            } => {
+                let r = crate::cpu_power::set(sustained_w, boost_w);
+                eprintln!("SetCpuPower {sustained_w}/{boost_w} W -> {r:?}");
+                r.map_or_else(Response::Error, |()| Response::Ok)
+            }
+            Request::ResetCpuPower => {
+                crate::cpu_power::reset().map_or_else(Response::Error, |()| Response::Ok)
+            }
             Request::GetDriverUpdates => match crate::drivers::list() {
                 Ok(d) => Response::Drivers(d),
                 Err(e) => Response::Error(e),
@@ -128,6 +140,25 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
             version: kestrel_core::VERSION.into(),
         },
         Request::GetStatus => Response::Status(Box::new(status(st))),
+        Request::RestoreDefaults if st.model.firmware_changed => Response::Error(
+            "Confirm the new EC firmware in Settings before restoring saved values.".into(),
+        ),
+        Request::ConfirmFirmware => {
+            if !st.model.firmware_changed {
+                return Response::Ok;
+            }
+            let mut s = crate::settings::Settings::load();
+            s.known_firmware = Some(st.model.firmware.clone());
+            if let Err(e) = s.save() {
+                return Response::Error(format!("couldn't save settings: {e}"));
+            }
+            if let Some(ec) = st.ec.as_mut() {
+                ec.set_read_only(false);
+            }
+            st.model.firmware_changed = false;
+            st.model.read_only = false;
+            Response::Ok
+        }
         Request::SetScenario(s) => {
             let r = apply_scenario(st, s);
             if r.is_ok() {
@@ -136,11 +167,15 @@ fn dispatch_inner(st: &mut State, req: Request) -> Response {
             result(r)
         }
         Request::SetCoolerBoost(on) => result(with_ec(st, |ec| ec.set_cooler_boost(on))),
+        Request::SetWebcam(on) => result(with_ec(st, |ec| ec.set_webcam(on))),
+        Request::SetFnWinSwap(on) => result(with_ec(st, |ec| ec.set_fn_win_swap(on))),
         Request::SetChargeLimit(p) => result(with_ec(st, |ec| ec.set_charge_limit(p))),
         Request::GetLighting => Response::Lighting(crate::lighting::list()),
-        Request::GetDriverUpdates | Request::InstallDriverUpdates(_) => {
-            Response::Error("driver requests are handled per connection".into())
-        }
+        Request::GetDriverUpdates
+        | Request::InstallDriverUpdates(_)
+        | Request::GetCpuPower
+        | Request::SetCpuPower { .. }
+        | Request::ResetCpuPower => Response::Error("handled per connection".into()),
         Request::SetLighting {
             device,
             color,
@@ -210,6 +245,12 @@ fn status(st: &mut State) -> Status {
     }
     if let Some(ec) = st.ec.as_mut() {
         s.caps = ec.caps();
+        if s.caps.webcam {
+            s.webcam = ec.webcam().ok();
+        }
+        if s.caps.fn_win_swap {
+            s.fn_win_swap = ec.fn_win_swap().ok();
+        }
         s.cooler_boost = ec.cooler_boost().ok();
         s.charge_limit = ec.charge_limit().ok().flatten();
         s.kbd_backlight = ec.kbd_backlight().ok();
